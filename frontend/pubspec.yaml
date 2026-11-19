@@ -1,0 +1,19 @@
+name: math_fun_frontend
+description: 少儿算术计算小游戏（Flutter 前端）
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  shared_preferences: ^2.2.3
+
+dev_dependencies:
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true

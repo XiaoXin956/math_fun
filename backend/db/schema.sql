@@ -1,0 +1,70 @@
+-- math_fun 数据库结构（与后端启动时的自动建表一致，供 Docker 初始化使用）
+-- 后端启动时也会自动执行幂等建表，本文件主要用于 docker-entrypoint-initdb.d。
+
+CREATE DATABASE IF NOT EXISTS math_fun CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE math_fun;
+
+CREATE TABLE IF NOT EXISTS users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(32) NOT NULL UNIQUE,
+  password_hash VARCHAR(128) NOT NULL,
+  salt VARCHAR(32) NOT NULL,
+  nickname VARCHAR(32) NOT NULL,
+  role ENUM('parent','child') NOT NULL DEFAULT 'child',
+  grade TINYINT NULL,
+  parent_id INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token VARCHAR(64) PRIMARY KEY,
+  user_id INT NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS questions (
+  id VARCHAR(64) PRIMARY KEY,
+  expression VARCHAR(64) NOT NULL,
+  answer INT NOT NULL,
+  grade TINYINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS records (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  question_id VARCHAR(64) NOT NULL,
+  expression VARCHAR(64) NOT NULL,
+  answer INT NOT NULL,
+  user_answer INT NOT NULL,
+  correct TINYINT NOT NULL DEFAULT 0,
+  mode VARCHAR(20) NOT NULL DEFAULT 'practice',
+  grade TINYINT NOT NULL,
+  duration_ms INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_user_time (user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS challenge_progress (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  grade TINYINT NOT NULL,
+  level TINYINT NOT NULL,
+  best_correct INT NOT NULL DEFAULT 0,
+  best_total INT NOT NULL DEFAULT 0,
+  best_stars TINYINT NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_user_grade_level (user_id, grade, level)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS timed_best (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  grade TINYINT NOT NULL,
+  best_score INT NOT NULL DEFAULT 0,
+  best_correct INT NOT NULL DEFAULT 0,
+  played_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_user_grade (user_id, grade)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

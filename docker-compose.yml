@@ -1,0 +1,37 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: math_fun_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: math_fun_root
+      MYSQL_DATABASE: math_fun
+    volumes:
+      - math_fun_db_data:/var/lib/mysql
+      # 数据库首次初始化时执行（建表 + 演示账号）
+      - ./backend/db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pmath_fun_root"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build: ./backend
+    container_name: math_fun_backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: math_fun_root
+      DB_NAME: math_fun
+      PORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  math_fun_db_data:

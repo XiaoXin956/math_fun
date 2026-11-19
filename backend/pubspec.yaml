@@ -1,0 +1,14 @@
+name: math_fun_backend
+description: 少儿算术计算小游戏后端 (Dart + MySQL)
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  mysql2: ^3.0.2
+  crypto: ^3.0.3
+
+dev_dependencies:
+  lints: ^3.0.0
