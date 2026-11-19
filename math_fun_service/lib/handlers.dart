@@ -1,5 +1,3 @@
-import 'package:mysql_client/mysql_client.dart';
-
 import 'auth.dart';
 import 'db.dart';
 import 'http_router.dart';
@@ -78,7 +76,7 @@ Future<Map<String, dynamic>> register(RouteContext ctx) async {
           'role': role,
           'grade': role == 'child' ? grade : null,
         });
-    return res.lastInsertID;
+    return res.lastInsertID.toInt();
   });
 
   final token = await createSession(result);
@@ -216,7 +214,6 @@ Future<Map<String, dynamic>> submitResult(RouteContext ctx) async {
   final questionId = _str(ctx.body, 'question_id');
   final userId = user['id'] as int;
   final mode = _str(ctx.body, 'mode');
-  final grade = _int(ctx.body['grade']);
   final userAnswer = _int(ctx.body['user_answer']);
   final durationMs = _int(ctx.body['duration_ms']).clamp(0, 600000);
 
@@ -318,11 +315,10 @@ Future<Map<String, dynamic>> stats(RouteContext ctx) async {
 
   final row = await Db.withConn((conn) async {
     final params = <String, dynamic>{};
-    final placeholders =
-        userIds.map((id, i) {
-          params['uid$i'] = id;
-          return ':uid$i';
-        }).join(',');
+    final placeholders = List.generate(userIds.length, (i) {
+      params['uid$i'] = userIds[i];
+      return ':uid$i';
+    }).join(',');
     final res = await conn.execute(
         'SELECT COUNT(*) AS total, '
         'SUM(correct = 1) AS correct, '
@@ -410,7 +406,7 @@ Future<Map<String, dynamic>> completeChallenge(RouteContext ctx) async {
 
   final accuracy = correct / total;
   final passed = accuracy >= _passRatio;
-  final stars = (accuracy >= _threeStarRatio ? 3 : (passed ? 2 : 0)) as int;
+  final stars = accuracy >= _threeStarRatio ? 3 : (passed ? 2 : 0);
 
   await Db.withConn((conn) async {
     await conn.execute(
@@ -646,11 +642,10 @@ Future<Map<String, dynamic>> pendingHandwriting(RouteContext ctx) async {
 
   final rows = await Db.withConn((conn) async {
     final params = <String, dynamic>{};
-    final placeholders =
-        childIds.map((id, i) {
-          params['cid$i'] = id;
-          return ':cid$i';
-        }).join(',');
+    final placeholders = List.generate(childIds.length, (i) {
+      params['cid$i'] = childIds[i];
+      return ':cid$i';
+    }).join(',');
     final res = await conn.execute(
         'SELECT s.id, s.user_id, s.expression, s.answer, s.image, s.created_at, u.nickname '
         'FROM handwriting_submissions s JOIN users u ON u.id = s.user_id '
@@ -686,7 +681,7 @@ Future<Map<String, dynamic>> reviewHandwriting(RouteContext ctx) async {
   final points = _int(ctx.body['points']);
 
   if (submissionId < 1) throw const ApiError(400, '缺少提交记录 ID');
-  if (correct is not bool) {
+  if (correct is! bool) {
     throw const ApiError(400, '请选择判断结果（正确/错误）');
   }
   if (points < 0 || points > 10) {
@@ -784,7 +779,7 @@ Future<Map<String, dynamic>> addChild(RouteContext ctx) async {
           'grade': grade,
           'parentId': parent['id'],
         });
-    return res.lastInsertID;
+    return res.lastInsertID.toInt();
   });
 
   return {'ok': true, 'child': await _loadUser(id)};

@@ -5,6 +5,7 @@ import '../bloc/auth_cubit.dart';
 import '../widgets/common.dart';
 
 class LoginPage extends StatefulWidget {
+  static const routeName = '/login';
   const LoginPage({super.key});
 
   @override

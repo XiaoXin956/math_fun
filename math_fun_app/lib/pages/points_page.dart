@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/points_cubit.dart';
+import '../models/models.dart';
 
 /// 积分明细：当前积分 + 每条积分的来源与加减分理由。
 class PointsPage extends StatefulWidget {
@@ -26,8 +27,8 @@ class _PointsPageState extends State<PointsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('🎖️ 积分明细')),
-      body: BlocConsumer<PointsCubit, PointsState>(
-        build: (context, state) {
+      body: BlocBuilder<PointsCubit, PointsState>(
+        builder: (context, state) {
           return SafeArea(
             child: RefreshIndicator(
               onRefresh: () => context.read<PointsCubit>().load(),

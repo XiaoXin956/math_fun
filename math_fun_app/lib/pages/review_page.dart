@@ -120,7 +120,7 @@ class _ReviewPageState extends State<ReviewPage> {
     final clean = base64.contains(',')
         ? base64.substring(base64.indexOf(',') + 1)
         : base64;
-    return base64.decode(clean.replaceAll('\n', ''));
+    return base64Decode(clean.replaceAll('\n', ''));
   }
 
   Future<void> _review(HandwritingSubmission item) async {

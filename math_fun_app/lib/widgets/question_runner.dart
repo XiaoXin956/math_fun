@@ -219,13 +219,12 @@ class _QuestionRunnerState extends State<QuestionRunner> {
       ),
       body: SafeArea(
         child: PopScope(
-          canPop: () => true,
-          onPopRequested: (details) async {
-            if (widget.mode == 'challenge' && !_finished &&
-                widget.onExitRequested != null) {
-              await _requestExit();
-              return;
-            }
+          canPop: !(widget.mode == 'challenge' &&
+              !_finished &&
+              widget.onExitRequested != null),
+          onPopInvokedWithResult: (didPop, result) {
+            if (didPop) return;
+            _requestExit();
           },
           child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),

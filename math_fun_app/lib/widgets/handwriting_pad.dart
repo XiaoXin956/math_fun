@@ -17,7 +17,7 @@ class HandwritingPad extends StatefulWidget {
 class HandwritingPadState extends State<HandwritingPad> {
   final List<List<ui.Offset>> strokes = [];
   List<ui.Offset>? current;
-  final _boundaryKey = GlobalKey<RenderRepaintBoundary>();
+  final _boundaryKey = GlobalKey();
 
   void _down(PointerDownEvent e) {
     setState(() {
@@ -41,6 +41,10 @@ class HandwritingPadState extends State<HandwritingPad> {
     });
   }
 
+  void _cancel(PointerCancelEvent e) {
+    setState(() => current = null);
+  }
+
   void clear() {
     setState(() {
       strokes.clear();
@@ -54,12 +58,11 @@ class HandwritingPadState extends State<HandwritingPad> {
         _boundaryKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
     if (render == null) return null;
     try {
-      final image = await render.toImage(
-          pixelRatio: 1.0, size: widget.size);
+      final image = await render.toImage(pixelRatio: 1.0);
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await image.close();
+      image.dispose();
       if (bytes == null) return null;
-      return base64Encode(bytes.toList());
+      return base64Encode(bytes.buffer.asUint8List());
     } catch (_) {
       return null;
     }
@@ -81,7 +84,7 @@ class HandwritingPadState extends State<HandwritingPad> {
           onPointerDown: _down,
           onPointerMove: _move,
           onPointerUp: _up,
-          onPointerCancel: _up,
+          onPointerCancel: _cancel,
           child: CustomPaint(
             size: widget.size,
             painter: _StrokePainter(strokes),

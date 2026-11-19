@@ -14,16 +14,15 @@ class ApiException implements Exception {
 class ApiClient {
   final Dio _dio;
 
-  ApiClient(String baseUrl) {
-    _dio = Dio(BaseOptions(
-      baseUrl: baseUrl,
-      connectTimeout: const Duration(seconds: 15),
-      receiveTimeout: const Duration(seconds: 15),
-      headers: const <String, String>{
-        'Content-Type': 'application/json; charset=utf-8',
-      },
-    ));
-  }
+  ApiClient(String baseUrl)
+      : _dio = Dio(BaseOptions(
+          baseUrl: baseUrl,
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 15),
+          headers: const <String, String>{
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+        ));
 
   String? _token;
 

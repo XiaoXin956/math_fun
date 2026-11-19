@@ -1,8 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
-import 'package:mysql_client/mysql_client.dart';
 
 import 'db.dart';
 import 'http_router.dart';
@@ -18,23 +18,18 @@ String hashPassword(String salt, String password) {
   return _sha256Hex('$salt$password');
 }
 
-String newSalt() {
-  final buf = List<int>.filled(8, 0);
-  Random.secure().nextBytes(buf);
-  return buf.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+String _randomHex(int length) {
+  final random = Random.secure();
+  return List<int>.generate(length, (_) => random.nextInt(256))
+      .map((b) => b.toRadixString(16).padLeft(2, '0'))
+      .join();
 }
 
-String newToken() {
-  final buf = List<int>.filled(32, 0);
-  Random.secure().nextBytes(buf);
-  return buf.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-}
+String newSalt() => _randomHex(8);
 
-String newQuestionId() {
-  final buf = List<int>.filled(16, 0);
-  Random.secure().nextBytes(buf);
-  return buf.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-}
+String newToken() => _randomHex(32);
+
+String newQuestionId() => _randomHex(16);
 
 /// users 表查询结果（typedAssoc 转 Map 后）转成前端使用的用户对象。
 /// 键: id, username, nickname, role, grade, parent_id, points
@@ -52,7 +47,7 @@ Map<String, dynamic> userMap(Map<String, dynamic> row) {
 
 /// 校验请求头中的 Bearer token，返回当前登录用户信息。
 /// 未登录或 token 过期时抛出 401 ApiError。
-Future<Map<String, dynamic>> requireUser(Map<String, List<String>> headers) async {
+Future<Map<String, dynamic>> requireUser(HttpHeaders headers) async {
   final auth = headers['authorization']?.first ?? '';
   final token = auth.startsWith('Bearer ') ? auth.substring(7).trim() : '';
   if (token.isEmpty) {

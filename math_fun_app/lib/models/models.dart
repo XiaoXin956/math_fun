@@ -96,7 +96,16 @@ class Child extends User {
   int totalAnswered;
   double accuracy;
 
-  Child(super.user, {required this.totalAnswered, required this.accuracy});
+  Child(User user, {required this.totalAnswered, required this.accuracy})
+      : super(
+          id: user.id,
+          username: user.username,
+          nickname: user.nickname,
+          role: user.role,
+          grade: user.grade,
+          parentId: user.parentId,
+          points: user.points,
+        );
 
   factory Child.fromJson(Map<String, dynamic> json) {
     return Child(

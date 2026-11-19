@@ -1,11 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 /// 轻量 HTTP 路由：基于 dart:io 的 HttpServer，支持 /path/:param 形式的路径参数。
 /// 统一 JSON 收发、CORS、错误处理。
 
-class ApiError extends Exception {
+class ApiError implements Exception {
   final int status;
   final String message;
   const ApiError(this.status, this.message);
@@ -73,7 +74,7 @@ class Router {
           HttpHeaders.accessControlAllowHeadersHeader, 'Content-Type, Authorization');
       res.headers.set(HttpHeaders.accessControlAllowMethodsHeader,
           'GET, POST, PUT, DELETE, OPTIONS');
-      await res.add(utf8.encode(bytes));
+      res.add(utf8.encode(bytes));
       await res.close();
     } catch (e) {
       await _sendError(request, e);
@@ -96,7 +97,7 @@ class Router {
       res.statusCode = status;
       res.headers.contentType = ContentType.json;
       res.headers.set(HttpHeaders.accessControlAllowOriginHeader, '*');
-      await res.add(utf8.encode(jsonEncode({'error': message})));
+      res.add(utf8.encode(jsonEncode({'error': message})));
       await res.close();
     } catch (_) {
       // 响应已发出或连接已断开，忽略
@@ -121,10 +122,13 @@ class Router {
       throw ApiError(404, '接口不存在');
     }
 
-    final entry = routeMap.values.firstWhere(
-      (e) => _match(e.segments, segments),
-      orElse: () => null,
-    );
+    _RouteEntry? entry;
+    for (final e in routeMap.values) {
+      if (_match(e.segments, segments)) {
+        entry = e;
+        break;
+      }
+    }
     if (entry == null) {
       throw ApiError(404, '接口不存在');
     }
@@ -139,8 +143,9 @@ class Router {
 
     final body = <String, dynamic>{};
     if (method == 'POST' || method == 'PUT') {
-      final raw = await utf8.decode(await request.fold(<List<int>>[],
-          (acc, bytes) => acc..addAll(bytes)));
+      final builder = BytesBuilder();
+      await request.forEach((chunk) => builder.add(chunk));
+      final raw = utf8.decode(builder.takeBytes());
       if (raw.trim().isNotEmpty) {
         final decoded = jsonDecode(raw);
         if (decoded is Map<String, dynamic>) {

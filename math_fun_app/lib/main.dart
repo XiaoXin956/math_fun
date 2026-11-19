@@ -46,7 +46,7 @@ class _AppShell extends StatelessWidget {
             debugShowCheckedModeBanner: false,
             theme: ThemeData(
               useMaterial3: true,
-              colorSchemeSeed: _primary,
+              colorSchemeSeed: MathFunApp._primary,
               brightness: Brightness.light,
               scaffoldBackgroundColor: const Color(0xFFFFF6F0),
               appBarTheme: const AppBarTheme(
@@ -59,15 +59,15 @@ class _AppShell extends StatelessWidget {
                 backgroundColor: Colors.transparent,
                 elevation: 0,
               ),
-              cardTheme: const CardTheme(
+              cardTheme: CardThemeData(
                 color: Colors.white,
                 elevation: 2,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(20),
                 ),
               ),
-              buttonTheme: ButtonThemeData(
-                buttonStyle: ElevatedButton.styleFrom(
+              elevatedButtonTheme: ElevatedButtonThemeData(
+                style: ElevatedButton.styleFrom(
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
