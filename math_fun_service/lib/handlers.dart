@@ -172,7 +172,9 @@ Future<Map<String, dynamic>> generateQuestions(RouteContext ctx) async {
   final grade = _int(ctx.body['grade']);
   _checkGrade(grade);
   final operation = _str(ctx.body, 'operation');
-  final type = _str(ctx.body, 'type');
+  final typeRaw = _str(ctx.body, 'type');
+  // 缺省视为 math，保证未显式传 type 的客户端也能正常出题
+  final type = typeRaw.isEmpty ? 'math' : typeRaw;
   if (type != 'math' && type != 'handwriting') {
     throw const ApiError(400, 'type 需为 math 或 handwriting');
   }

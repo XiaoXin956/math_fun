@@ -99,6 +99,7 @@ class _QuestionRunnerState extends State<QuestionRunner> {
         'grade': widget.grade,
         'operation': widget.operation,
         'count': 1,
+        'type': 'math',
       });
       final questions = res['questions'] as List;
       if (!mounted) return;
@@ -185,7 +186,9 @@ class _QuestionRunnerState extends State<QuestionRunner> {
     if (e is ApiException && e.status == 401) {
       Session.clear().then((_) {
         if (!mounted) return;
-        Navigator.of(context).pushReplacementNamed(LoginPage.routeName);
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+        );
       });
       return;
     }
