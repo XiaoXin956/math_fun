@@ -7,6 +7,7 @@ class User {
   final String role; // parent / child
   final int? grade;
   final int? parentId;
+  final int points;
 
   const User({
     required this.id,
@@ -15,6 +16,7 @@ class User {
     required this.role,
     required this.grade,
     required this.parentId,
+    required this.points,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -25,6 +27,7 @@ class User {
       role: json['role'] as String,
       grade: json['grade'] as int?,
       parentId: json['parentId'] as int?,
+      points: json['points'] as int,
     );
   }
 
@@ -80,7 +83,8 @@ class Record {
     try {
       final d = DateTime.parse(createdAt);
       return "${d.year}-${d.month.toString().padLeft(2, '0')}-"
-          "${d.day.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:"
+          "${d.day.toString().padLeft(2, '0')} "
+          "${d.hour.toString().padLeft(2, '0')}:"
           "${d.minute.toString().padLeft(2, '0')}";
     } catch (_) {
       return createdAt;
@@ -131,6 +135,79 @@ class LevelInfo {
       stars: json['stars'] as int,
       passed: json['passed'] as bool,
       unlocked: json['unlocked'] as bool,
+    );
+  }
+}
+
+/// 积分记录
+class PointsRecord {
+  final int change;
+  final String reason;
+  final int grade;
+  final int level;
+  final String createdAt;
+
+  const PointsRecord({
+    required this.change,
+    required this.reason,
+    required this.grade,
+    required this.level,
+    required this.createdAt,
+  });
+
+  factory PointsRecord.fromJson(Map<String, dynamic> json) {
+    return PointsRecord(
+      change: json['change'] as int,
+      reason: json['reason'] as String,
+      grade: json['grade'] as int,
+      level: json['level'] as int,
+      createdAt: json['createdAt'] as String,
+    );
+  }
+
+  String get timeLabel {
+    if (createdAt.isEmpty) return '';
+    try {
+      final d = DateTime.parse(createdAt);
+      return "${d.month.toString().padLeft(2, '0')}-"
+          "${d.day.toString().padLeft(2, '0')} "
+          "${d.hour.toString().padLeft(2, '0')}:"
+          "${d.minute.toString().padLeft(2, '0')}";
+    } catch (_) {
+      return createdAt;
+    }
+  }
+}
+
+/// 手写答案提交（家长批改用）
+class HandwritingSubmission {
+  final int id;
+  final int childId;
+  final String childName;
+  final String expression;
+  final int answer;
+  final String image; // base64 PNG
+  final String createdAt;
+
+  const HandwritingSubmission({
+    required this.id,
+    required this.childId,
+    required this.childName,
+    required this.expression,
+    required this.answer,
+    required this.image,
+    required this.createdAt,
+  });
+
+  factory HandwritingSubmission.fromJson(Map<String, dynamic> json) {
+    return HandwritingSubmission(
+      id: json['id'] as int,
+      childId: json['childId'] as int,
+      childName: json['childName'] as String,
+      expression: json['expression'] as String,
+      answer: json['answer'] as int,
+      image: json['image'] as String,
+      createdAt: json['createdAt'] as String,
     );
   }
 }

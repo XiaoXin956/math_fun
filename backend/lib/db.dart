@@ -97,6 +97,7 @@ class Db {
           "role ENUM('parent','child') NOT NULL DEFAULT 'child',"
           'grade TINYINT NULL,'
           'parent_id INT NULL,'
+          'points INT NOT NULL DEFAULT 0,'
           'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
           ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
@@ -113,6 +114,7 @@ class Db {
           'expression VARCHAR(64) NOT NULL,'
           'answer INT NOT NULL,'
           'grade TINYINT NOT NULL,'
+          "type VARCHAR(20) NOT NULL DEFAULT 'math',"
           'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
           ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
@@ -154,6 +156,45 @@ class Db {
           ' ON UPDATE CURRENT_TIMESTAMP,'
           'UNIQUE KEY uniq_user_grade (user_id, grade)'
           ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+
+      // 积分记录表
+      await conn.query('CREATE TABLE IF NOT EXISTS points_records ('
+          'id INT AUTO_INCREMENT PRIMARY KEY,'
+          'user_id INT NOT NULL,'
+          'grade TINYINT NOT NULL DEFAULT 0,'
+          'level TINYINT NOT NULL DEFAULT 0,'
+          'change INT NOT NULL,'
+          'reason VARCHAR(128) NOT NULL,'
+          'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
+          'INDEX idx_user_time (user_id, created_at),'
+          'INDEX idx_user_level (user_id, grade, level)'
+          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+
+      // 手写答案提交表（等待家长批改）
+      await conn.query('CREATE TABLE IF NOT EXISTS handwriting_submissions ('
+          'id INT AUTO_INCREMENT PRIMARY KEY,'
+          'user_id INT NOT NULL,'
+          'question_id VARCHAR(64) NOT NULL,'
+          'expression VARCHAR(64) NOT NULL,'
+          'answer INT NOT NULL,'
+          'image LONGTEXT NOT NULL,'
+          'status ENUM("pending","reviewed") NOT NULL DEFAULT "pending",'
+          'reviewed_by INT NULL,'
+          'review_change INT NULL,'
+          'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
+          'reviewed_at DATETIME NULL,'
+          'INDEX idx_user (user_id),'
+          'INDEX idx_status (status)'
+          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+
+      // 兼容旧库：补充后来新增的字段（新库建表时已包含，重复执行报错则忽略）
+      try {
+        await conn.query('ALTER TABLE users ADD COLUMN points INT NOT NULL DEFAULT 0');
+      } catch (_) {}
+      try {
+        await conn.query(
+            "ALTER TABLE questions ADD COLUMN type VARCHAR(20) NOT NULL DEFAULT 'math'");
+      } catch (_) {}
 
       // 清理过期题目（7 天前的临时题目记录）
       await conn.query(

@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/models.dart';
 import '../services/session.dart';
+import 'handwriting_page.dart';
 import 'history_page.dart';
 import 'login_page.dart';
+import 'points_page.dart';
+import 'review_page.dart';
 
 class HomePage extends StatefulWidget {
   static const routeName = '/home';
@@ -74,6 +77,23 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 24),
             if (user.isParent) ...[
               _panelCard(
+                title: '🖊️ 待批改',
+                children: [
+                  ListTile(
+                    contentPadding: const EdgeInsets.all(4),
+                    leading: const Icon(Icons.edit_note,
+                        color: Color(0xFFE8842C), size: 30),
+                    title: const Text('手写答案批改',
+                        style: TextStyle(fontSize: 16)),
+                    subtitle: const Text('查看孩子提交的手写答案，判断对错并打分'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () =>
+                        Navigator.of(context).pushNamed(ReviewPage.routeName),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _panelCard(
                 title: '👨‍👩‍👧 家长面板',
                 children: [
                   Row(
@@ -140,6 +160,24 @@ class _HomePageState extends State<HomePage> {
                         : '${user.grade ?? 2} 年级 · 一起来算术吧',
                     style: const TextStyle(fontSize: 14, color: Color(0xFF8A5A4A)),
                   ),
+                  if (!user.isParent) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF0E8),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '🎖️ 当前积分：${user.points}',
+                        style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFFE8842C)),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -209,6 +247,16 @@ class _HomePageState extends State<HomePage> {
         _modeCard('⏰', '限时挑战', '60 秒内答得越多越棒', () {
           Navigator.of(context).pushNamed('/timed');
         }),
+        const SizedBox(height: 12),
+        _modeCard('✍️', '手写练习', '手写答案，交家长批改', () {
+          Navigator.of(context).pushNamed(HandwritingPage.routeName);
+        }),
+        const SizedBox(height: 12),
+        ElevatedButton.icon(
+          onPressed: () => Navigator.of(context).pushNamed(PointsPage.routeName),
+          icon: const Icon(Icons.star_rate_outlined),
+          label: const Text('积分记录'),
+        ),
         const SizedBox(height: 12),
         ElevatedButton.icon(
           onPressed: () =>

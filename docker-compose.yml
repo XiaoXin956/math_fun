@@ -16,9 +16,9 @@ services:
       timeout: 5s
       retries: 20
 
-  backend:
+  math_fun_service:
     build: ./backend
-    container_name: math_fun_backend
+    container_name: math_fun_service
     restart: unless-stopped
     environment:
       DB_HOST: db

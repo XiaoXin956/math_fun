@@ -17,6 +17,7 @@ class ChallengePage extends StatefulWidget {
 
 class _ChallengePageState extends State<ChallengePage> {
   int _grade = 2;
+  LevelInfo? _currentLevel;
   List<LevelInfo> _levels = [];
   bool _loading = true;
 
@@ -130,6 +131,7 @@ class _ChallengePageState extends State<ChallengePage> {
   }
 
   Future<void> _playLevel(LevelInfo level) async {
+    _currentLevel = level;
     final summary = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => QuestionRunner(
@@ -140,9 +142,45 @@ class _ChallengePageState extends State<ChallengePage> {
           onComplete: (summary) {
             Navigator.of(context).pop(summary);
           },
+          onExitRequested: () async {
+            final ok = await showDialog<bool>(
+              context: context,
+              barrierDismissible: false,
+              builder: (ctx) => AlertDialog(
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+                title: const Text('确认退出本关？'),
+                content: const Text(
+                  '中途退出本关将扣除 5 积分，确定要退出吗？',
+                  style: TextStyle(fontSize: 16),
+                ),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text('继续答题')),
+                  TextButton(
+                      onPressed: () => Navigator.of(ctx).pop(true),
+                      child: const Text('确认退出',
+                          style: TextStyle(color: Colors.red))),
+                ],
+              ),
+            );
+            if (ok == true && _currentLevel != null) {
+              try {
+                await _client.post('/api/progress/challenge/quit', {
+                  'grade': _grade,
+                  'level': _currentLevel!.level,
+                });
+              } catch (_) {
+                // 扣分失败不阻塞退出
+              }
+            }
+            return ok == true;
+          },
         ),
       ),
     );
+    _currentLevel = null;
     if (summary == null || !mounted) return;
 
     // 上报成绩并显示结果
@@ -155,6 +193,9 @@ class _ChallengePageState extends State<ChallengePage> {
       });
       final passed = res['passed'] as bool;
       final stars = res['stars'] as int;
+      final points = res['points'] as Map<String, dynamic>;
+      final pointsText =
+          "积分变动：${points['changed'] as int >= 0 ? '+' : ''}${points['changed'] as int}（${points['reason'] as String}）";
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
@@ -171,6 +212,15 @@ class _ChallengePageState extends State<ChallengePage> {
               const SizedBox(height: 8),
               Text('获得 ${starText(stars)}',
                   style: const TextStyle(fontSize: 22)),
+              const SizedBox(height: 8),
+              Text(
+                pointsText,
+                style: TextStyle(
+                    fontSize: 15,
+                    color: (points['changed'] as int) >= 0
+                        ? const Color(0xFF2E9E5B)
+                        : const Color(0xFFD9534F)),
+              ),
               if (passed && res['nextUnlocked'] == true)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),

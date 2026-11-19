@@ -37,7 +37,7 @@ String newQuestionId() {
 }
 
 /// users 表查询结果（按固定列序）转成前端使用的用户对象。
-/// 列序: id, username, nickname, role, grade, parent_id
+/// 列序: id, username, nickname, role, grade, parent_id, points
 Map<String, dynamic> userMap(MySqlRow row) {
   return {
     'id': row[0],
@@ -46,6 +46,7 @@ Map<String, dynamic> userMap(MySqlRow row) {
     'role': row[3],
     'grade': row[4],
     'parentId': row[5],
+    'points': row[6],
   };
 }
 
@@ -59,7 +60,7 @@ Future<Map<String, dynamic>> requireUser(Map<String, String> headers) async {
   }
   final rows = await Db.withConn((conn) async {
     final res = await conn.query(
-        'SELECT u.id, u.username, u.nickname, u.role, u.grade, u.parent_id '
+        'SELECT u.id, u.username, u.nickname, u.role, u.grade, u.parent_id, u.points '
         'FROM sessions s JOIN users u ON u.id = s.user_id '
         'WHERE s.token = ? AND s.expires_at > NOW()',
         [token]);

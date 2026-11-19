@@ -35,10 +35,19 @@ void main() async {
   // 闯关进度
   router.add('GET', '/api/progress/challenge', challengeProgress);
   router.add('POST', '/api/progress/challenge', completeChallenge);
+  router.add('POST', '/api/progress/challenge/quit', quitChallenge);
 
   // 限时挑战
   router.add('POST', '/api/progress/timed', submitTimed);
   router.add('GET', '/api/progress/timed', timedBest);
+
+  // 积分
+  router.add('GET', '/api/points', pointsHistory);
+
+  // 手写答案：孩子提交 / 家长批改
+  router.add('POST', '/api/handwriting/submit', submitHandwriting);
+  router.add('GET', '/api/handwriting/pending', pendingHandwriting);
+  router.add('POST', '/api/handwriting/review', reviewHandwriting);
 
   // 家长端
   router.add('POST', '/api/children', addChild);

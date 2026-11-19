@@ -1,26 +1,37 @@
 # 数学乐园 🧮
 
-一款面向小学生的算术计算小游戏。前端 Flutter，后端 Dart + MySQL。
+一款面向小学生的算术计算小游戏。
+
+- **前端**：Flutter 项目 `math_fun_app`，包名 `com.xiaoxin.math_fun_app`
+- **后端**：Dart 服务 `math_fun_service` + MySQL
 
 ## 功能
 
-- **三种玩法**
+- **四种玩法**
   - 🎯 自由练习：自选年级与运算（加/减/乘/除/混合），每次 10 题
   - 🏆 闯关挑战：每个年级 5 关，正确率 ≥ 70% 通关，按表现获得 ⭐
   - ⏰ 限时挑战：60 秒倒计时，答得越多分越高，记录最佳成绩
+  - ✍️ 手写练习：出带书写区的算术题，孩子手写答案后提交给家长批改
+- **积分奖励系统**
+  - 闯关完成自动结算积分：成功率 **≥ 95% +3 分**；成功率在 **80%~95% 不加不减**；成功率 **不足 80%（含 60%）-3 分**
+  - 闯关**中途退出 -5 分**，退出前弹窗提醒
+  - **同一关卡 7 天内重复挑战不再加分**
+  - 手写题由家长批改：判断正确自动加分，错误扣分，**分值由家长决定（0~10 分）**
 - **按年级自动适配难度**：一年级（20 以内加减）到六年级（大数四则混合运算）
-- **完整账号体系**：家长/孩子角色注册登录；家长可添加孩子账号并查看孩子成绩
+- **家长-孩子账号绑定**：家长登录后创建孩子账号，自动建立绑定关系；家长可查看孩子成绩、批改手写答案
 - 题目由**服务端生成**，答案不下发到客户端，判分在服务端完成
 
 ## 目录结构
 
 ```
 math_fun/
-├── docker-compose.yml      # 一键启动 MySQL + 后端
-├── backend/                # Dart 后端
+├── docker-compose.yml       # 一键启动 MySQL 8 + 后端服务
+├── backend/                 # Dart 服务端 math_fun_service
 │   ├── Dockerfile
 │   ├── pubspec.yaml
-│   ├── db/                 # 数据库初始化 SQL（建表 + 演示账号）
+│   ├── db/
+│   │   ├── schema.sql       # 完整建库建表 SQL
+│   │   └── seed.sql         # 演示账号
 │   └── lib/
 │       ├── main.dart            # 入口与路由注册
 │       ├── http_router.dart     # 轻量 HTTP 路由（dart:io）
@@ -29,16 +40,31 @@ math_fun/
 │       ├── auth.dart            # 密码哈希 / token
 │       ├── question_generator.dart # 按年级出题
 │       └── handlers.dart        # 业务接口
-└── frontend/               # Flutter 前端
+└── frontend/                # Flutter 应用 math_fun_app
     ├── pubspec.yaml
     └── lib/
         ├── main.dart            # 应用入口与主题
         ├── api/                 # API 客户端与地址配置
         ├── models/              # 数据模型
         ├── services/session.dart # 登录会话持久化
-        ├── widgets/             # 公共组件、答题组件
-        └── pages/               # 登录、首页、练习、闯关、限时、成绩
+        ├── widgets/             # 公共组件、答题组件、手写画板
+        └── pages/               # 登录、首页、练习、闯关、限时、
+                                 # 手写、批改、积分、成绩
 ```
+
+## MySQL SQL 文件
+
+- `backend/db/schema.sql`：完整建库建表语句（用户、会话、题目、记录、闯关进度、限时成绩、积分记录、手写提交）
+- `backend/db/seed.sql`：演示账号（家长 + 孩子，自动绑定）
+
+手动导入：
+
+```bash
+mysql -uroot -p < backend/db/schema.sql
+mysql -uroot -p < backend/db/seed.sql
+```
+
+Docker 部署时这两个文件会自动在数据库首次初始化时执行。
 
 ## 快速开始（Docker 一键部署后端）
 
@@ -50,16 +76,15 @@ docker compose up -d --build
 
 启动后：
 
-- 后端 API：http://localhost:8080
-- MySQL：容器内 `math_fun_db`，数据库 `math_fun`
-- 初始化 SQL（建表 + 演示账号）在首次启动数据库时自动执行
+- 后端服务 `math_fun_service`：http://localhost:8080
+- MySQL：容器 `math_fun_db`，数据库 `math_fun`
 
 演示账号（密码均为 `123456`，生产环境请修改）：
 
 | 账号 | 角色 | 说明 |
 | --- | --- | --- |
-| `parent` | 家长 | 登录后可添加孩子、查看成绩 |
-| `xiaoming` | 孩子 | 二年级，可直接开始游戏 |
+| `parent` | 家长 | 登录后可添加孩子、批改手写答案、查看成绩 |
+| `xiaoming` | 孩子 | 二年级，已绑定 `parent`，可直接开始游戏 |
 
 ### 手动启动后端（不用 Docker）
 
@@ -68,7 +93,6 @@ docker compose up -d --build
 ```bash
 cd backend
 dart pub get
-# 创建数据库（表结构会在启动时自动创建）
 mysql -uroot -p < db/schema.sql
 dart run lib/main.dart \
   -DB_HOST=127.0.0.1 -DB_USER=root -DB_PASSWORD=123456 -DB_NAME=math_fun
@@ -76,10 +100,12 @@ dart run lib/main.dart \
 
 ## 运行前端（Flutter）
 
-需要本机安装 Flutter SDK（3.3+）。
+需要本机安装 Flutter SDK（3.3+）。首次需要生成平台工程并指定包名：
 
 ```bash
 cd frontend
+# 生成 android/ios 等平台目录，包名 com.xiaoxin.math_fun_app
+flutter create --org com.xiaoxin --project-name math_fun_app .
 flutter pub get
 flutter run
 ```
@@ -88,7 +114,23 @@ flutter run
 > 真机调试请修改 `frontend/lib/api/config.dart` 中的 `apiBaseUrl` 为后端所在机器的 IP，例如
 > `http://192.168.1.10:8080`。
 
-iOS / Web 同理，改好地址后运行对应平台的 `flutter run` 即可。
+## 积分规则说明
+
+闯关完成时自动结算（服务端计算）：
+
+| 成功率 | 积分 |
+| --- | --- |
+| ≥ 95% | +3 |
+| 80% ~ 95% | 0（不加不减） |
+| < 80%（含 60%） | -3 |
+
+其他规则：
+
+- **中途退出**：闯关未答完就退出，扣 **5 分**，退出前有弹窗提醒
+- **7 天限制**：同一关卡（同年级同关卡号）7 天内重复完成，不再加分
+- **手写批改**：家长判断正确 → 加家长所选分值；判断错误 → 扣家长所选分值；分值 0~10，默认 5
+
+积分明细可在 App 内「积分记录」页面查看。
 
 ## 主要 API
 
@@ -98,13 +140,18 @@ iOS / Web 同理，改好地址后运行对应平台的 `flutter run` 即可。
 | POST | `/api/auth/login` | 登录，返回 token |
 | GET | `/api/auth/me` | 当前用户与孩子列表 |
 | GET | `/api/grades` | 年级配置 |
-| POST | `/api/questions` | 生成题目（答案仅存服务端） |
+| POST | `/api/questions` | 生成题目（`type` 为 `math` 或 `handwriting`，答案仅存服务端） |
 | POST | `/api/results` | 提交答案判分并记录 |
+| POST | `/api/handwriting/submit` | 提交手写答案图片（base64 PNG） |
+| GET | `/api/handwriting/pending` | 家长查看待批改列表 |
+| POST | `/api/handwriting/review` | 家长批改（correct + points 0-10） |
 | GET | `/api/history` | 本人答题记录 |
 | GET | `/api/stats` | 统计 |
-| GET/POST | `/api/progress/challenge` | 闯关进度查询 / 上报 |
+| GET/POST | `/api/progress/challenge` | 闯关进度查询 / 上报（自动结算积分） |
+| POST | `/api/progress/challenge/quit` | 闯关中途退出（扣 5 分） |
 | GET/POST | `/api/progress/timed` | 限时最佳成绩查询 / 上报 |
-| POST/GET | `/api/children` | 家长添加 / 查看孩子 |
+| GET | `/api/points` | 积分明细与总分 |
+| POST/GET | `/api/children` | 家长添加 / 查看孩子（自动绑定） |
 | GET | `/api/children/:id/history` | 查看某孩子的成绩 |
 
 除注册、登录外，所有接口都需要请求头 `Authorization: Bearer <token>`。

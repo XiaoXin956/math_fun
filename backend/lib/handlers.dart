@@ -80,7 +80,7 @@ Future<Map<String, dynamic>> login(RouteContext ctx) async {
 
   final rows = await Db.withConn((conn) async {
     final res = await conn.query(
-        'SELECT id, username, nickname, role, grade, parent_id, salt, password_hash '
+        'SELECT id, username, nickname, role, grade, parent_id, points, salt, password_hash '
         'FROM users WHERE username = ?',
         [username]);
     return res.rows;
@@ -89,8 +89,8 @@ Future<Map<String, dynamic>> login(RouteContext ctx) async {
     throw const ApiError(401, '用户名或密码错误');
   }
   final row = rows.first;
-  final hash = hashPassword(row[6] as String, password);
-  if (hash != row[7]) {
+  final hash = hashPassword(row[7] as String, password);
+  if (hash != row[8]) {
     throw const ApiError(401, '用户名或密码错误');
   }
 
@@ -118,7 +118,8 @@ Future<Map<String, dynamic>> me(RouteContext ctx) async {
 Future<Map<String, dynamic>> _loadUser(int id) async {
   final rows = await Db.withConn((conn) async {
     final res = await conn.query(
-        'SELECT id, username, nickname, role, grade, parent_id FROM users WHERE id = ?',
+        'SELECT id, username, nickname, role, grade, parent_id, points '
+        'FROM users WHERE id = ?',
         [id]);
     return res.rows;
   });
@@ -128,7 +129,7 @@ Future<Map<String, dynamic>> _loadUser(int id) async {
 Future<List<Map<String, dynamic>>> _childrenOf(int parentId) async {
   final rows = await Db.withConn((conn) async {
     final res = await conn.query(
-        'SELECT id, username, nickname, role, grade, parent_id FROM users '
+        'SELECT id, username, nickname, role, grade, parent_id, points FROM users '
         "WHERE parent_id = ? AND role = 'child' ORDER BY id",
         [parentId]);
     return res.rows;
@@ -158,6 +159,10 @@ Future<Map<String, dynamic>> generateQuestions(RouteContext ctx) async {
   final grade = _int(ctx.body['grade']);
   _checkGrade(grade);
   final operation = _str(ctx.body, 'operation');
+  final type = _str(ctx.body, 'type');
+  if (type != 'math' && type != 'handwriting') {
+    throw const ApiError(400, 'type 需为 math 或 handwriting');
+  }
   final count = _int(ctx.body['count']).clamp(1, 10);
 
   final questions = generateBatch(grade: grade, operation: operation, count: count);
@@ -167,13 +172,15 @@ Future<Map<String, dynamic>> generateQuestions(RouteContext ctx) async {
     for (final (expression, answer) in questions) {
       final id = newQuestionId();
       await conn.query(
-          'INSERT INTO questions (id, expression, answer, grade) VALUES (?, ?, ?, ?)',
-          [id, expression, answer, grade]);
+          'INSERT INTO questions (id, expression, answer, grade, type) '
+          'VALUES (?, ?, ?, ?, ?)',
+          [id, expression, answer, grade, type]);
       // 注意：不向客户端返回答案，答案只在服务端保存，判分在提交时进行
       list.add({
         'id': id,
         'expression': expression,
         'grade': grade,
+        'type': type,
       });
     }
   });
@@ -386,11 +393,103 @@ Future<Map<String, dynamic>> completeChallenge(RouteContext ctx) async {
         [user['id'], grade, level, correct, total, stars]);
   });
 
+  // 积分规则：成功率 >= 95% 加 3 分；80%~95% 不加不减；不足 80%（含 60%）扣 3 分
+  // 同一关卡 7 天内重复挑战不再加分
+  final userId = user['id'] as int;
+  final since = DateTime.now().subtract(const Duration(days: 7));
+  final recentAward = await Db.withConn((conn) async {
+    final res = await conn.query(
+        'SELECT id FROM points_records '
+        'WHERE user_id = ? AND grade = ? AND level = ? AND change > 0 AND created_at >= ? '
+        'LIMIT 1',
+        [userId, grade, level, since]);
+    return res.rows.isNotEmpty;
+  });
+
+  Map<String, dynamic> points;
+  if (recentAward) {
+    points = {
+      'changed': 0,
+      'reason': '7天内本关已获得过积分，本次不再加分',
+    };
+  } else if (accuracy >= 0.95) {
+    points = await _awardPoints(
+        userId, 3, '闯关成功率≥95%，奖励+3分', grade, level);
+  } else if (accuracy >= 0.80) {
+    points = {'changed': 0, 'reason': '闯关成功率在80%~95%之间，不加分也不扣分'};
+  } else {
+    points = await _awardPoints(
+        userId, -3, '闯关成功率不足80%，扣3分', grade, level);
+  }
+
   return {
     'passed': passed,
     'stars': stars,
     'accuracy': accuracy,
     'nextUnlocked': passed && level < _challengeLevelsPerGrade,
+    'points': points,
+  };
+}
+
+/// 中途退出闯关：扣 5 分
+Future<Map<String, dynamic>> quitChallenge(RouteContext ctx) async {
+  final user = await requireUser(ctx.request.headers);
+  final grade = _int(ctx.body['grade']);
+  final level = _int(ctx.body['level']);
+  _checkGrade(grade);
+  if (level < 1 || level > _challengeLevelsPerGrade) {
+    throw const ApiError(400, '关卡需为 1-5');
+  }
+  final points = await _awardPoints(
+      user['id'] as int, -5, '闯关中途退出，扣5分', grade, level);
+  return {'ok': true, 'points': points};
+}
+
+/// 积分变动：更新用户总分并写入积分记录。
+Future<Map<String, dynamic>> _awardPoints(
+    int userId, int change, String reason, int grade, int level) async {
+  await Db.withConn((conn) async {
+    await conn.query('UPDATE users SET points = points + ? WHERE id = ?',
+        [change, userId]);
+    await conn.query(
+        'INSERT INTO points_records (user_id, grade, level, change, reason) '
+        'VALUES (?, ?, ?, ?, ?)',
+        [userId, grade, level, change, reason]);
+  });
+  return {'changed': change, 'reason': reason};
+}
+
+/// 积分记录与总分
+Future<Map<String, dynamic>> pointsHistory(RouteContext ctx) async {
+  final user = await requireUser(ctx.request.headers);
+  final limit = int.tryParse(ctx.query['limit'] ?? '50')?.clamp(1, 200) ?? 50;
+
+  final total = await Db.withConn((conn) async {
+    final res = await conn.query('SELECT points FROM users WHERE id = ?',
+        [user['id']]);
+    return res.rows.isEmpty ? 0 : (res.rows.first[0] as num).toInt();
+  });
+
+  final rows = await Db.withConn((conn) async {
+    final res = await conn.query(
+        'SELECT change, reason, grade, level, created_at FROM points_records '
+        'WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+        [user['id'], limit]);
+    return res.rows;
+  });
+
+  return {
+    'total': total,
+    'records': rows.map((row) {
+      final created = row[4] as DateTime?;
+      return {
+        'change': row[0],
+        'reason': row[1],
+        'grade': row[2],
+        'level': row[3],
+        'createdAt': created?.toIso8601String() ?? '',
+      };
+    }).toList(),
   };
 }
 
@@ -432,6 +531,147 @@ Future<Map<String, dynamic>> timedBest(RouteContext ctx) async {
         .map((r) => {'grade': r[0], 'score': r[1], 'correct': r[2]})
         .toList(),
   };
+}
+
+// ---------- 手写答案：孩子提交，家长批改 ----------
+
+/// 孩子提交手写答案（base64 PNG 图片）
+Future<Map<String, dynamic>> submitHandwriting(RouteContext ctx) async {
+  final user = await requireUser(ctx.request.headers);
+  final questionId = _str(ctx.body, 'question_id');
+  final image = _str(ctx.body, 'image');
+
+  if (questionId.isEmpty) throw const ApiError(400, '缺少题目 ID');
+  if (image.length < 100) {
+    throw const ApiError(400, '手写答案图片无效');
+  }
+  if (image.length > 2000000) {
+    throw const ApiError(400, '手写答案图片过大，请重绘后提交');
+  }
+
+  final row = await Db.withConn((conn) async {
+    final res = await conn.query(
+        'SELECT expression, answer, type FROM questions WHERE id = ?',
+        [questionId]);
+    return res.rows.isEmpty ? null : res.rows.first;
+  });
+  if (row == null) {
+    throw const ApiError(404, '题目不存在或已过期，请重新出题');
+  }
+  if (row[2] != 'handwriting') {
+    throw const ApiError(400, '该题目不是手写题');
+  }
+
+  await Db.withConn((conn) async {
+    await conn.query(
+        'INSERT INTO handwriting_submissions '
+        '(user_id, question_id, expression, answer, image, status) '
+        'VALUES (?, ?, ?, ?, ?, "pending")',
+        [
+          user['id'],
+          questionId,
+          row[0],
+          row[1],
+          image,
+        ]);
+  });
+
+  return {'ok': true, 'message': '已提交，等待家长批改'};
+}
+
+/// 家长查看待批改列表
+Future<Map<String, dynamic>> pendingHandwriting(RouteContext ctx) async {
+  final parent = await requireUser(ctx.request.headers);
+  if (parent['role'] != 'parent') {
+    throw const ApiError(403, '只有家长账号可以批改手写答案');
+  }
+  final children = await _childrenOf(parent['id'] as int);
+  final childIds = children.map((c) => c['id'] as int).toList();
+  if (childIds.isEmpty) {
+    return {'submissions': <Map<String, dynamic>>[], 'total': 0};
+  }
+
+  final placeholders = childIds.map((_) => '?').join(',');
+  final rows = await Db.withConn((conn) async {
+    final res = await conn.query(
+        'SELECT s.id, s.user_id, s.expression, s.answer, s.image, s.created_at, u.nickname '
+        'FROM handwriting_submissions s JOIN users u ON u.id = s.user_id '
+        'WHERE s.user_id IN ($placeholders) AND s.status = "pending" '
+        'ORDER BY s.created_at DESC LIMIT 50',
+        childIds);
+    return res.rows;
+  });
+
+  final list = rows.map((row) {
+    final created = row[5] as DateTime?;
+    return {
+      'id': row[0],
+      'childId': row[1],
+      'childName': row[6],
+      'expression': row[2],
+      'answer': row[3],
+      'image': row[4],
+      'createdAt': created?.toIso8601String() ?? '',
+    };
+  }).toList();
+  return {'submissions': list, 'total': list.length};
+}
+
+/// 家长批改：确认正确加分、否则扣分，分值由家长决定（0-10）
+Future<Map<String, dynamic>> reviewHandwriting(RouteContext ctx) async {
+  final parent = await requireUser(ctx.request.headers);
+  if (parent['role'] != 'parent') {
+    throw const ApiError(403, '只有家长账号可以批改手写答案');
+  }
+  final submissionId = _int(ctx.body['submission_id']);
+  final correct = ctx.body['correct'];
+  final points = _int(ctx.body['points']);
+
+  if (submissionId < 1) throw const ApiError(400, '缺少提交记录 ID');
+  if (correct is not bool) {
+    throw const ApiError(400, '请选择判断结果（正确/错误）');
+  }
+  if (points < 0 || points > 10) {
+    throw const ApiError(400, '积分绝对值不能超过 10');
+  }
+
+  final rows = await Db.withConn((conn) async {
+    final res = await conn.query(
+        'SELECT s.id, s.user_id, s.status FROM handwriting_submissions s '
+        'JOIN users u ON u.id = s.user_id '
+        'WHERE s.id = ? AND u.parent_id = ?',
+        [submissionId, parent['id']]);
+    return res.rows;
+  });
+  if (rows.isEmpty) {
+    throw const ApiError(404, '提交记录不存在');
+  }
+  final row = rows.first;
+  if (row[2] != 'pending') {
+    throw const ApiError(400, '该提交已批改过，不能重复批改');
+  }
+  final childId = row[1] as int;
+
+  final change = correct ? points : -points;
+  final reason = correct
+      ? '手写答案批改为正确，+$points 分'
+      : '手写答案批改为错误，-$points 分';
+
+  await Db.withConn((conn) async {
+    await conn.query('UPDATE users SET points = points + ? WHERE id = ?',
+        [change, childId]);
+    await conn.query(
+        'INSERT INTO points_records (user_id, grade, level, change, reason) '
+        'VALUES (?, 0, 0, ?, ?)',
+        [childId, change, reason]);
+    await conn.query(
+        'UPDATE handwriting_submissions '
+        'SET status = "reviewed", reviewed_by = ?, review_change = ?, reviewed_at = NOW() '
+        'WHERE id = ?',
+        [parent['id'], change, submissionId]);
+  });
+
+  return {'ok': true, 'changed': change, 'reason': reason};
 }
 
 // ---------- 家长端：孩子管理 ----------

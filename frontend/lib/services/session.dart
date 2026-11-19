@@ -55,6 +55,7 @@ class Session {
       'role': user.role,
       'grade': user.grade,
       'parentId': user.parentId,
+      'points': user.points,
     };
   }
 

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import 'pages/challenge_page.dart';
+import 'pages/handwriting_page.dart';
 import 'pages/history_page.dart';
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
+import 'pages/points_page.dart';
 import 'pages/practice_page.dart';
+import 'pages/review_page.dart';
 import 'pages/timed_page.dart';
 import 'services/session.dart';
 
@@ -68,6 +71,9 @@ class MathFunApp extends StatelessWidget {
         PracticePage.routeName: (_) => const PracticePage(),
         ChallengePage.routeName: (_) => const ChallengePage(),
         TimedPage.routeName: (_) => const TimedPage(),
+        HandwritingPage.routeName: (_) => const HandwritingPage(),
+        ReviewPage.routeName: (_) => const ReviewPage(),
+        PointsPage.routeName: (_) => const PointsPage(),
         HistoryPage.routeName: (_) => const HistoryPage(),
       },
     );

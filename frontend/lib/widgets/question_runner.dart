@@ -19,6 +19,9 @@ class QuestionRunner extends StatefulWidget {
   final int? totalQuestions;
   final void Function(Map<String, dynamic> summary)? onComplete;
 
+  /// 闯关模式下点击返回/退出时调用，返回 true 表示确认退出。
+  final Future<bool> Function()? onExitRequested;
+
   const QuestionRunner({
     super.key,
     required this.grade,
@@ -26,6 +29,7 @@ class QuestionRunner extends StatefulWidget {
     required this.mode,
     this.totalQuestions,
     this.onComplete,
+    this.onExitRequested,
   });
 
   @override
@@ -43,6 +47,7 @@ class _QuestionRunnerState extends State<QuestionRunner> {
 
   int _answered = 0;
   int _correctCount = 0;
+  bool _finished = false;
 
   Timer? _timer;
   int _secondsLeft = 0;
@@ -158,6 +163,7 @@ class _QuestionRunnerState extends State<QuestionRunner> {
   }
 
   void _finish() {
+    _finished = true;
     _timer?.cancel();
     _timer = null;
     final summary = <String, dynamic>{
@@ -191,6 +197,19 @@ class _QuestionRunnerState extends State<QuestionRunner> {
     );
   }
 
+  /// 请求退出：闯关模式中途退出需要先确认（扣 5 分）。
+  Future<void> _requestExit() async {
+    if (widget.mode == 'challenge' && !_finished &&
+        widget.onExitRequested != null) {
+      final ok = await widget.onExitRequested!();
+      if (ok && mounted) {
+        Navigator.of(context).pop();
+      }
+    } else if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final total = widget.totalQuestions;
@@ -199,7 +218,16 @@ class _QuestionRunnerState extends State<QuestionRunner> {
         title: Text(widget.mode == 'timed' ? '限时挑战 ⏰' : '答题中 🎯'),
       ),
       body: SafeArea(
-        child: Padding(
+        child: PopScope(
+          canPop: () => true,
+          onPopRequested: (details) async {
+            if (widget.mode == 'challenge' && !_finished &&
+                widget.onExitRequested != null) {
+              await _requestExit();
+              return;
+            }
+          },
+          child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -298,10 +326,16 @@ class _QuestionRunnerState extends State<QuestionRunner> {
                   onPressed: _busy ? null : _finish,
                   child: const Text('提前结束'),
                 ),
+              if (widget.mode == 'challenge')
+                TextButton(
+                  onPressed: _busy ? null : _requestExit,
+                  child: const Text('退出闯关（扣5分）'),
+                ),
             ],
           ),
         ),
       ),
+    ),
     );
   }
 }

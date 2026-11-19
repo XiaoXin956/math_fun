@@ -1,5 +1,5 @@
-name: math_fun_backend
-description: 少儿算术计算小游戏后端 (Dart + MySQL)
+name: math_fun_service
+description: 少儿算术计算小游戏服务端 (Dart + MySQL)
 version: 1.0.0
 publish_to: none
 
