@@ -1,33 +1,23 @@
-# ---------- 构建阶段 ----------
-FROM dart:3.4.4-bookworm AS builder
-
-WORKDIR /app
+# 使用最新稳定版 Dart SDK（需支持 dart build cli）
+FROM dart:stable AS build
 
 # 先拷贝依赖清单，利用 Docker 层缓存
-COPY pubspec.yaml ./
+WORKDIR /app
+COPY pubspec.* ./
 RUN dart pub get
 
-# 再拷贝源码并编译为可执行文件
-COPY lib ./lib
-RUN dart compile -o server
+# 拷贝源码（.dockerignore 中排除 .env / 构建产物等）
+# 再编译为 AOT bundle，产物位于 /app/output/bundle/
+COPY . .
+RUN dart build cli --target lib/main.dart -o output
 
-# ---------- 运行阶段 ----------
-FROM debian:bookworm-slim
+# 使用 scratch 最小镜像：仅包含 AOT 运行时与编译产物
+FROM scratch
+COPY --from=build /runtime/ /
+COPY --from=build /app/output/bundle/ /app/
 
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=builder /app/server /app/server
-
-ENV HOST=0.0.0.0 \
-    PORT=8082 \
-    DB_HOST=db \
-    DB_PORT=3306 \
-    DB_USER=root \
-    DB_PASSWORD=math_fun_root \
-    DB_NAME=math_fun
-
+# DB_* / PORT 等环境变量由 docker-compose 注入（HOST 默认 0.0.0.0）
 EXPOSE 8082
 
-CMD ["/app/server"]
+# 启动服务（入口为 lib/main.dart，对应 bundle/bin/main）
+CMD ["/app/bin/main"]

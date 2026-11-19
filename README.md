@@ -27,7 +27,7 @@
 
 ```
 math_fun/
-├── docker-compose.yml           # 一键启动 MySQL 8 + 后端服务
+├── docker-compose.yml           # 一键启动后端服务（直连远程 MySQL）
 ├── math_fun_service/            # Dart 服务端 math_fun_service
 │   ├── Dockerfile
 │   ├── pubspec.yaml
@@ -60,18 +60,19 @@ math_fun/
 - `math_fun_service/db/schema.sql`：完整建库建表语句（用户、会话、题目、记录、闯关进度、限时成绩、积分记录、手写提交）
 - `math_fun_service/db/seed.sql`：演示账号（家长 + 孩子，自动绑定）
 
-手动导入：
+手动导入（如需在本地独立建库时）：
 
 ```bash
 mysql -uroot -p < math_fun_service/db/schema.sql
 mysql -uroot -p < math_fun_service/db/seed.sql
 ```
 
-Docker 部署时这两个文件会自动在数据库首次初始化时执行。
+> 默认部署使用**远程 MySQL**（配置在 `math_fun_service/.env`），docker-compose 不再启动本地 MySQL 容器，也不会自动导入这两个文件。
+> 后端首次启动会自动执行幂等建表（`CREATE TABLE IF NOT EXISTS`），无需手动导入 `schema.sql`；演示账号需按需手动导入 `seed.sql`。
 
-## 快速开始（Docker 一键部署后端）
+## 快速开始（Docker 一键部署：Web 客户端 + 后端）
 
-前提：本机已安装 Docker 与 Docker Compose。
+前提：本机已安装 Docker 与 Docker Compose，且 `.env` 中已配置好可连接的远程 MySQL。
 
 ```bash
 docker compose up -d --build
@@ -79,10 +80,10 @@ docker compose up -d --build
 
 启动后：
 
-- 后端服务 `math_fun_service`：http://localhost:8082
-- MySQL：容器 `math_fun_db`，数据库 `math_fun`
+- **Web 客户端**：http://localhost:8083（nginx 托管 Flutter Web，`/api/*` 同源反代到后端容器）
+- **后端 API**：http://localhost:8082（数据库为 `.env` 中配置的远程 MySQL，供手机 App 直连）
 
-演示账号（密码均为 `123456`，生产环境请修改）：
+演示账号（密码均为 `123456`，需先在远程库中导入 `db/seed.sql`，生产环境请修改）：
 
 | 账号 | 角色 | 说明 |
 | --- | --- | --- |
@@ -91,7 +92,7 @@ docker compose up -d --build
 
 ### 手动启动后端（不用 Docker）
 
-需要本机安装 Dart SDK（3.3+）与 MySQL 8。
+需要本机安装 Dart SDK（3.3+），并有一个可连接的 MySQL（本地或远程均可）。
 
 在 `math_fun_service/.env` 中配置数据库连接（该文件已被 .gitignore 忽略，不会提交到仓库）：
 

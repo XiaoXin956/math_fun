@@ -1,0 +1,15 @@
+# 构建上下文排除项（多阶段构建只需要源码）
+.dart_tool/
+build/
+.packages
+.idea/
+*.iml
+.git/
+android/
+ios/
+linux/
+macos/
+windows/
+test/
+integration_test/
+.env

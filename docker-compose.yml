@@ -1,37 +1,43 @@
-services:
-  db:
-    image: mysql:8.0
-    container_name: math_fun_db
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: math_fun_root
-      MYSQL_DATABASE: math_fun
-    volumes:
-      - math_fun_db_data:/var/lib/mysql
-      # 数据库首次初始化时执行（建表 + 演示账号）
-      - ./math_fun_service/db:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pmath_fun_root"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+# 数学乐园 一键部署：web(nginx 静态+反代) + 后端(Dart)
+# 数据库用远程 MySQL（配置在 math_fun_service/.env）
+#
+# 访问：
+#   Web 客户端 http://<本机IP>:8083   （/api 由 nginx 反代到后端容器）
+#   后端 API  http://<本机IP>:8082   （供手机 App 直连）
+#
+# 手机 App 需确认 math_fun_app/lib/api/config.dart 的 apiBaseUrl
+# 默认值指向后端对外可达地址（当前 http://47.250.81.247:8082）
+#
+# 启动：
+#   docker compose up -d --build
+# 停止：
+#   docker compose down
 
+services:
+  # ---------- Flutter web：nginx 托管静态文件 + /api 反代 ----------
+  web:
+    build:
+      context: ./math_fun_app
+      dockerfile: Dockerfile.web
+    image: math_fun_web
+    container_name: math_fun_web
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    depends_on:
+      - math_fun_service
+
+  # ---------- 后端 API ----------
   math_fun_service:
-    build: ./math_fun_service
+    build:
+      context: ./math_fun_service
+      dockerfile: Dockerfile
+    image: math_fun_service
     container_name: math_fun_service
     restart: unless-stopped
-    environment:
-      DB_HOST: db
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: math_fun_root
-      DB_NAME: math_fun
-      PORT: "8082"
+    # 用 .env 注入 DB_HOST / DB_PORT / DB_USER / DB_PASSWORD / DB_NAME /
+    # DB_SECURE / PORT / HOST 等配置（不要用内联 environment 覆盖远程库地址）
+    env_file:
+      - ./math_fun_service/.env
     ports:
       - "8082:8082"
-    depends_on:
-      db:
-        condition: service_healthy
-
-volumes:
-  math_fun_db_data:
