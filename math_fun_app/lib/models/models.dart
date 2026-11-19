@@ -177,6 +177,20 @@ class PointsRecord {
       return createdAt;
     }
   }
+
+  /// 积分来源标签：闯关结算 / 中途退出 / 手写批改
+  String get sourceLabel {
+    if (reason.contains('手写')) return '手写批改';
+    if (reason.contains('退出')) return '中途退出';
+    if (reason.contains('闯关')) return '闯关结算';
+    return '其他';
+  }
+
+  /// 关卡信息（闯关记录有年级与关卡号）
+  String get levelLabel {
+    if (level > 0 && grade > 0) return '${grade} 年级 第 $level 关';
+    return '';
+  }
 }
 
 /// 手写答案提交（家长批改用）

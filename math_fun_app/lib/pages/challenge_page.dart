@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../api/api_client.dart';
+import '../bloc/auth_cubit.dart';
 import '../models/models.dart';
 import '../services/session.dart';
 import '../widgets/common.dart';
@@ -171,6 +173,8 @@ class _ChallengePageState extends State<ChallengePage> {
                   'grade': _grade,
                   'level': _currentLevel!.level,
                 });
+                // 积分有变动，刷新用户状态让首页同步
+                context.read<AuthCubit>().refresh();
               } catch (_) {
                 // 扣分失败不阻塞退出
               }
@@ -236,6 +240,8 @@ class _ChallengePageState extends State<ChallengePage> {
           ],
         ),
       );
+      // 积分有变动，刷新用户状态让首页同步
+      context.read<AuthCubit>().refresh();
       _loadProgress();
     } catch (_) {
       // 上报失败也返回列表

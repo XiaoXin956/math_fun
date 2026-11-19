@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../api/api_client.dart';
+import '../bloc/auth_cubit.dart';
 import '../models/models.dart';
 import '../services/session.dart';
 
@@ -229,6 +231,8 @@ class _ReviewPageState extends State<ReviewPage> {
                     });
                     if (!mounted) return;
                     Navigator.of(ctx).pop(true);
+                    // 积分有变动，刷新用户状态让首页同步
+                    context.read<AuthCubit>().refresh();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(

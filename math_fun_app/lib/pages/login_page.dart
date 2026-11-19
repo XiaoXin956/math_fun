@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../api/api_client.dart';
-import '../models/models.dart';
-import '../services/session.dart';
+import '../bloc/auth_cubit.dart';
 import '../widgets/common.dart';
-import 'home_page.dart';
 
 class LoginPage extends StatefulWidget {
-  static const routeName = '/login';
   const LoginPage({super.key});
 
   @override
@@ -22,36 +19,12 @@ class _LoginPageState extends State<LoginPage> {
   String _role = 'child'; // child / parent
   int _grade = 2;
 
-  ApiClient get _client => Session.createClient();
-
-  Future<void> _submit(bool isRegister) async {
-    final username = _username.text.trim();
-    final password = _password.text;
-    if (username.isEmpty || password.isEmpty) {
-      _error('请输入用户名和密码');
-      return;
-    }
-    try {
-      final res = await _client.post(
-        isRegister ? '/api/auth/register' : '/api/auth/login',
-        isRegister
-            ? {
-                'username': username,
-                'password': password,
-                'nickname': _nickname.text.trim(),
-                'role': _role,
-                'grade': _role == 'child' ? _grade : null,
-              }
-            : {'username': username, 'password': password},
-      );
-      final user = User.fromJson(res['user'] as Map<String, dynamic>);
-      await Session.save(_client, user, res['token'] as String);
-      if (!mounted) return;
-      Navigator.of(context).pushReplacementNamed(HomePage.routeName);
-    } catch (e) {
-      if (!mounted) return;
-      _error(e is ApiException ? e.message : '请求失败，请检查后端服务是否启动');
-    }
+  @override
+  void dispose() {
+    _username.dispose();
+    _password.dispose();
+    _nickname.dispose();
+    super.dispose();
   }
 
   void _error(String message) {
@@ -64,12 +37,35 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  @override
-  void dispose() {
-    _username.dispose();
-    _password.dispose();
-    _nickname.dispose();
-    super.dispose();
+  Future<void> _submit(bool isRegister) async {
+    final username = _username.text.trim();
+    final password = _password.text;
+    if (username.isEmpty || password.isEmpty) {
+      _error('请输入用户名和密码');
+      return;
+    }
+    final cubit = context.read<AuthCubit>();
+    if (isRegister && _nickname.text.trim().isEmpty) {
+      _error('请输入昵称');
+      return;
+    }
+    if (isRegister) {
+      await cubit.register({
+        'username': username,
+        'password': password,
+        'nickname': _nickname.text.trim(),
+        'role': _role,
+        'grade': _role == 'child' ? _grade : null,
+      });
+    } else {
+      await cubit.login(username, password);
+    }
+    if (!mounted) return;
+    final state = cubit.state;
+    if (state.error != null) {
+      _error(state.error!);
+    }
+    // 登录成功时 AuthState 携带 user，_AppShell 会自动切换到首页
   }
 
   @override
@@ -128,7 +124,17 @@ class _LoginPageState extends State<LoginPage> {
             onSubmitted: (_) => _submit(false),
           ),
           const SizedBox(height: 24),
-          ElevatedButton(onPressed: () => _submit(false), child: const Text('登录')),
+          BlocBuilder<AuthCubit, AuthState>(
+            builder: (context, state) {
+              return ElevatedButton(
+                onPressed: state.isLoading ? null : () => _submit(false),
+                child: Text(
+                  state.isLoading ? '登录中…' : '登录',
+                  style: const TextStyle(fontSize: 18),
+                ),
+              );
+            },
+          ),
           const SizedBox(height: 16),
           const Text(
             '演示账号：parent / 123456（家长）或 xiaoming / 123456（孩子）',
@@ -195,7 +201,17 @@ class _LoginPageState extends State<LoginPage> {
             GradeChips(selected: _grade, onChanged: (g) => setState(() => _grade = g)),
           ],
           const SizedBox(height: 24),
-          ElevatedButton(onPressed: () => _submit(true), child: const Text('注册')),
+          BlocBuilder<AuthCubit, AuthState>(
+            builder: (context, state) {
+              return ElevatedButton(
+                onPressed: state.isLoading ? null : () => _submit(true),
+                child: Text(
+                  state.isLoading ? '注册中…' : '注册',
+                  style: const TextStyle(fontSize: 18),
+                ),
+              );
+            },
+          ),
           const SizedBox(height: 16),
           const Text(
             '家长注册后可在首页添加孩子账号并查看成绩',

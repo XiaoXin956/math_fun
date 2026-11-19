@@ -9,7 +9,7 @@ services:
     volumes:
       - math_fun_db_data:/var/lib/mysql
       # 数据库首次初始化时执行（建表 + 演示账号）
-      - ./backend/db:/docker-entrypoint-initdb.d:ro
+      - ./math_fun_service/db:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pmath_fun_root"]
       interval: 5s
@@ -17,7 +17,7 @@ services:
       retries: 20
 
   math_fun_service:
-    build: ./backend
+    build: ./math_fun_service
     container_name: math_fun_service
     restart: unless-stopped
     environment:

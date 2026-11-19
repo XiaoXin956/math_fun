@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../api/api_client.dart';
+import '../bloc/auth_cubit.dart';
 import '../models/models.dart';
 import '../services/session.dart';
 import 'handwriting_page.dart';
 import 'history_page.dart';
-import 'login_page.dart';
 import 'points_page.dart';
 import 'review_page.dart';
 
@@ -18,17 +19,18 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  User? _user;
   List<Child> _children = [];
   bool _loading = true;
 
   ApiClient get _client => Session.createClient();
 
+  /// 当前登录用户来自 AuthCubit（全局状态由 BLoC 管理）
+  User get _user => context.read<AuthCubit>().state.user!;
+
   @override
   void initState() {
     super.initState();
-    _user = Session.user;
-    if (_user?.isParent ?? false) {
+    if (_user.isParent) {
       _loadChildren();
     } else {
       _loading = false;
@@ -52,21 +54,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _logout() async {
-    try {
-      await _client.post('/api/auth/logout', {});
-    } catch (_) {
-      // 忽略登出请求失败
-    }
-    await Session.clear();
-    if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed(LoginPage.routeName);
+    // 由 AuthCubit 统一处理登出，状态变化后 _AppShell 会自动切回登录页
+    await context.read<AuthCubit>().logout();
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = _user;
+    // watch：积分等用户状态变化时自动重建
+    final user = context.watch<AuthCubit>().state.user;
     if (user == null) {
-      return const Scaffold(body: Center(child: Text('正在加载…'));
+      return const Scaffold(body: Center(child: Text('正在加载…')));
     }
     return Scaffold(
       body: SafeArea(

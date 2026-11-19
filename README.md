@@ -2,7 +2,7 @@
 
 一款面向小学生的算术计算小游戏。
 
-- **前端**：Flutter 项目 `math_fun_app`，包名 `com.xiaoxin.math_fun_app`
+- **前端**：Flutter 项目 `math_fun_app`，包名 `com.xiaoxin.math_fun_app`，状态管理使用 **BLoC**
 - **后端**：Dart 服务 `math_fun_service` + MySQL
 
 ## 功能
@@ -17,6 +17,8 @@
   - 闯关**中途退出 -5 分**，退出前弹窗提醒
   - **同一关卡 7 天内重复挑战不再加分**
   - 手写题由家长批改：判断正确自动加分，错误扣分，**分值由家长决定（0~10 分）**
+- **积分明细**：App 内「积分明细」页面可查看当前总分及每条记录的
+  **积分来源**（闯关结算 / 中途退出 / 手写批改）与**加减分理由**、时间
 - **按年级自动适配难度**：一年级（20 以内加减）到六年级（大数四则混合运算）
 - **家长-孩子账号绑定**：家长登录后创建孩子账号，自动建立绑定关系；家长可查看孩子成绩、批改手写答案
 - 题目由**服务端生成**，答案不下发到客户端，判分在服务端完成
@@ -25,13 +27,13 @@
 
 ```
 math_fun/
-├── docker-compose.yml       # 一键启动 MySQL 8 + 后端服务
-├── backend/                 # Dart 服务端 math_fun_service
+├── docker-compose.yml           # 一键启动 MySQL 8 + 后端服务
+├── math_fun_service/            # Dart 服务端 math_fun_service
 │   ├── Dockerfile
 │   ├── pubspec.yaml
 │   ├── db/
-│   │   ├── schema.sql       # 完整建库建表 SQL
-│   │   └── seed.sql         # 演示账号
+│   │   ├── schema.sql           # 完整建库建表 SQL
+│   │   └── seed.sql             # 演示账号
 │   └── lib/
 │       ├── main.dart            # 入口与路由注册
 │       ├── http_router.dart     # 轻量 HTTP 路由（dart:io）
@@ -40,10 +42,11 @@ math_fun/
 │       ├── auth.dart            # 密码哈希 / token
 │       ├── question_generator.dart # 按年级出题
 │       └── handlers.dart        # 业务接口
-└── frontend/                # Flutter 应用 math_fun_app
+└── math_fun_app/                # Flutter 应用 math_fun_app（BLoC 状态管理）
     ├── pubspec.yaml
     └── lib/
-        ├── main.dart            # 应用入口与主题
+        ├── main.dart            # 应用入口、BlocProvider 根布局
+        ├── bloc/                # BLoC：AuthCubit（认证/会话）、PointsCubit（积分）
         ├── api/                 # API 客户端与地址配置
         ├── models/              # 数据模型
         ├── services/session.dart # 登录会话持久化
@@ -54,14 +57,14 @@ math_fun/
 
 ## MySQL SQL 文件
 
-- `backend/db/schema.sql`：完整建库建表语句（用户、会话、题目、记录、闯关进度、限时成绩、积分记录、手写提交）
-- `backend/db/seed.sql`：演示账号（家长 + 孩子，自动绑定）
+- `math_fun_service/db/schema.sql`：完整建库建表语句（用户、会话、题目、记录、闯关进度、限时成绩、积分记录、手写提交）
+- `math_fun_service/db/seed.sql`：演示账号（家长 + 孩子，自动绑定）
 
 手动导入：
 
 ```bash
-mysql -uroot -p < backend/db/schema.sql
-mysql -uroot -p < backend/db/seed.sql
+mysql -uroot -p < math_fun_service/db/schema.sql
+mysql -uroot -p < math_fun_service/db/seed.sql
 ```
 
 Docker 部署时这两个文件会自动在数据库首次初始化时执行。
@@ -91,7 +94,7 @@ docker compose up -d --build
 需要本机安装 Dart SDK（3.3+）与 MySQL 8。
 
 ```bash
-cd backend
+cd math_fun_service
 dart pub get
 mysql -uroot -p < db/schema.sql
 dart run lib/main.dart \
@@ -103,7 +106,7 @@ dart run lib/main.dart \
 需要本机安装 Flutter SDK（3.3+）。首次需要生成平台工程并指定包名：
 
 ```bash
-cd frontend
+cd math_fun_app
 # 生成 android/ios 等平台目录，包名 com.xiaoxin.math_fun_app
 flutter create --org com.xiaoxin --project-name math_fun_app .
 flutter pub get
@@ -111,8 +114,18 @@ flutter run
 ```
 
 > **重要**：默认后端地址是 `http://10.0.2.2:8080`（Android 模拟器访问宿主机）。
-> 真机调试请修改 `frontend/lib/api/config.dart` 中的 `apiBaseUrl` 为后端所在机器的 IP，例如
+> 真机调试请修改 `math_fun_app/lib/api/config.dart` 中的 `apiBaseUrl` 为后端所在机器的 IP，例如
 > `http://192.168.1.10:8080`。
+
+## 状态管理（BLoC）
+
+前端全局状态由 BLoC 管理，页面局部交互状态使用 setState：
+
+- **AuthCubit**：登录、注册、登出、本地会话恢复、刷新用户（含积分）。
+  登录状态变化时，根布局自动在「登录页 / 首页」间切换，无需手动导航
+- **PointsCubit**：积分总分与明细的加载、刷新，供「积分明细」页消费
+- 积分发生变动（闯关结算、中途退出、手写批改）后，相关页面会触发
+  `AuthCubit.refresh()`，首页积分实时同步
 
 ## 积分规则说明
 
@@ -130,7 +143,7 @@ flutter run
 - **7 天限制**：同一关卡（同年级同关卡号）7 天内重复完成，不再加分
 - **手写批改**：家长判断正确 → 加家长所选分值；判断错误 → 扣家长所选分值；分值 0~10，默认 5
 
-积分明细可在 App 内「积分记录」页面查看。
+积分明细可在 App 内「积分明细」页面查看，每条记录包含**积分来源**（闯关结算 / 中途退出 / 手写批改）、**加减分理由**、关卡信息与时间。
 
 ## 主要 API
 
