@@ -12,7 +12,7 @@ class Db {
 
   static MySQLConnectionPool get pool => _pool!;
 
-  static Future<void> init(AppConfig config) async {
+  static Future<void>  init(AppConfig config) async {
     _config = config;
 
     // 重试等待 MySQL 就绪（例如 docker-compose 中数据库还在初始化）
@@ -133,6 +133,15 @@ class Db {
         'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
         'INDEX idx_user_time (user_id, created_at),'
         'INDEX idx_user_level (user_id, grade, level)'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+
+    // 自由练习每日次数统计（每天每用户一行，用于限制每日加分次数）
+    await pool.execute('CREATE TABLE IF NOT EXISTS practice_daily ('
+        'id INT AUTO_INCREMENT PRIMARY KEY,'
+        'user_id INT NOT NULL,'
+        'practice_date DATE NOT NULL,'
+        'rounds INT NOT NULL DEFAULT 0,'
+        'UNIQUE KEY uniq_user_date (user_id, practice_date)'
         ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
     // 手写答案提交表（等待家长批改）

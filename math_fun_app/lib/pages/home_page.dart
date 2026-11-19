@@ -249,6 +249,13 @@ class _HomePageState extends State<HomePage> {
           Navigator.of(context).pushNamed(HandwritingPage.routeName);
         }),
         const SizedBox(height: 12),
+        _modeCard('📕', '错题回顾', '集中复习做错的题目', () {
+          Navigator.of(context).pushNamed(
+            HistoryPage.routeName,
+            arguments: {'wrongOnly': true},
+          );
+        }),
+        const SizedBox(height: 12),
         ElevatedButton.icon(
           onPressed: () => Navigator.of(context).pushNamed(PointsPage.routeName),
           icon: const Icon(Icons.star_rate_outlined),
@@ -315,11 +322,87 @@ class _HomePageState extends State<HomePage> {
                 style: const TextStyle(fontSize: 14, color: Color(0xFF8A5A4A)),
               ),
             ),
-            TextButton(onPressed: _logout, child: const Text('退出登录')),
+            PopupMenuButton<String>(
+              tooltip: '账号切换 / 退出登录',
+              icon: const Icon(Icons.logout, color: Color(0xFF8A5A4A)),
+              onSelected: (value) {
+                if (value == '__logout__') {
+                  _logout();
+                } else {
+                  _switchAccount(value, user);
+                }
+              },
+              itemBuilder: (context) {
+                final others = Session.savedAccounts
+                    .where((a) => a.username != user.username)
+                    .toList();
+                return [
+                  const PopupMenuItem<String>(
+                    enabled: false,
+                    child: Text('切换账号',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFFB09A8E))),
+                  ),
+                  if (others.isEmpty)
+                    const PopupMenuItem<String>(
+                      enabled: false,
+                      child: Text('暂无其它已记住的账号',
+                          style: TextStyle(fontSize: 13, color: Color(0xFFB09A8E))),
+                    )
+                  else
+                    ...others.map(
+                      (a) => PopupMenuItem<String>(
+                        value: a.username,
+                        child: Row(
+                          children: [
+                            const Icon(Icons.switch_account, size: 18,
+                                color: Color(0xFFE8842C)),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                a.nickname.isNotEmpty ? a.nickname : a.username,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem<String>(
+                    value: '__logout__',
+                    child: Row(
+                      children: [
+                        Icon(Icons.logout, size: 18, color: Colors.red),
+                        SizedBox(width: 10),
+                        Text('退出登录', style: TextStyle(color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                ];
+              },
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _switchAccount(String username, User current) async {
+    final account = Session.savedAccounts
+        .where((a) => a.username == username)
+        .toList();
+    if (account.isEmpty) return;
+    await context.read<AuthCubit>().switchAccount(account.first);
+    if (!mounted) return;
+    final err = context.read<AuthCubit>().state.error;
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(err), backgroundColor: Colors.red),
+      );
+    }
   }
 
   Future<void> _showAddChildDialog() async {

@@ -54,14 +54,17 @@ class Record {
   });
 
   factory Record.fromJson(Map<String, dynamic> json) {
+    // 兼容 num/int/String 等数字类型，避免后端类型差异导致类型转换异常白屏
+    int asInt(dynamic v) =>
+        v is int ? v : (v is num ? v.toInt() : int.tryParse('$v') ?? 0);
     return Record(
-      expression: json['expression'] as String,
-      answer: json['answer'] as int,
-      userAnswer: json['userAnswer'] as int,
-      correct: json['correct'] as bool,
-      mode: json['mode'] as String,
-      grade: json['grade'] as int,
-      createdAt: json['createdAt'] as String,
+      expression: (json['expression'] ?? '').toString(),
+      answer: asInt(json['answer']),
+      userAnswer: asInt(json['userAnswer']),
+      correct: json['correct'] == true || json['correct'] == 1,
+      mode: (json['mode'] ?? '').toString(),
+      grade: asInt(json['grade']),
+      createdAt: (json['createdAt'] ?? '').toString(),
     );
   }
 

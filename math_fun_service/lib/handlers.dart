@@ -274,20 +274,176 @@ String _praise() {
   return list[i % list.length];
 }
 
+// ---------- 自由练习：批量出题（答案随题目一起下发，供客户端本地判分） ----------
+
+Future<Map<String, dynamic>> practiceQuestions(RouteContext ctx) async {
+  await requireUser(ctx.request.headers);
+
+  final grade = _int(ctx.body['grade']);
+  _checkGrade(grade);
+  final operation = _str(ctx.body, 'operation');
+  final count = _int(ctx.body['count']).clamp(1, 20);
+
+  final questions = generateBatch(grade: grade, operation: operation, count: count);
+
+  final list = <Map<String, dynamic>>[];
+  await Db.withConn((conn) async {
+    for (final (expression, answer) in questions) {
+      final id = newQuestionId();
+      await conn.execute(
+          'INSERT INTO questions (id, expression, answer, grade, type) '
+          'VALUES (:id, :expression, :answer, :grade, :type)',
+          {
+            'id': id,
+            'expression': expression,
+            'answer': answer,
+            'grade': grade,
+            'type': 'math',
+          });
+      // 自由练习：答案随题目一并下发，客户端本地判分，答题过程零网络等待
+      list.add({
+        'id': id,
+        'expression': expression,
+        'grade': grade,
+        'answer': answer,
+      });
+    }
+  });
+  return {'questions': list};
+}
+
+// ---------- 自由练习：批量上报成绩（一次请求写入全部记录） ----------
+
+Future<Map<String, dynamic>> practiceResults(RouteContext ctx) async {
+  final user = await requireUser(ctx.request.headers);
+  final userId = user['id'] as int;
+  final grade = _int(ctx.body['grade']);
+  _checkGrade(grade);
+  // mode 默认 practice；challenge 闯关也走此批量写记录，但积分由 completeChallenge 负责
+  final mode = _str(ctx.body, 'mode');
+  final recordMode = mode == 'challenge' ? 'challenge' : 'practice';
+
+  final rawList = ctx.body['results'];
+  if (rawList is! List || rawList.isEmpty || rawList.length > 20) {
+    throw const ApiError(400, 'results 需为 1-20 题的数组');
+  }
+
+  var correctCount = 0;
+  var validCount = 0;
+  await Db.withConn((conn) async {
+    for (final item in rawList) {
+      if (item is! Map<String, dynamic>) continue;
+      final qid = _str(item, 'question_id');
+      final userAnswer = _int(item['user_answer']);
+      final durationMs = _int(item['duration_ms']).clamp(0, 600000);
+      if (qid.isEmpty) continue;
+
+      // 按题目 ID 查库拿答案，服务端重新判分，保证历史记录真实、防止伪造 correct
+      final qres = await conn.execute(
+          'SELECT answer, expression, grade FROM questions WHERE id = :qid',
+          {'qid': qid});
+      if (qres.rows.isEmpty) continue;
+      final row = qres.rows.first.typedAssoc();
+      final answer = row['answer'] as int;
+      final correct = userAnswer == answer;
+      if (correct) correctCount++;
+      validCount++;
+
+      await conn.execute(
+          'INSERT INTO records '
+          '(user_id, question_id, expression, answer, user_answer, correct, mode, grade, duration_ms) '
+          'VALUES (:userId, :qid, :expression, :answer, :userAnswer, :correct, :mode, :grade, :durationMs)',
+          {
+            'userId': userId,
+            'qid': qid,
+            'expression': row['expression'] as String,
+            'answer': answer,
+            'userAnswer': userAnswer,
+            'correct': correct ? 1 : 0,
+            'mode': recordMode,
+            'grade': _int(row['grade']),
+            'durationMs': durationMs,
+          });
+    }
+  });
+
+  final accuracy = validCount == 0 ? 0.0 : correctCount / validCount;
+
+  // 闯关模式：只写逐题记录，不计入自由练习的每日次数，积分由 completeChallenge 负责
+  if (recordMode == 'challenge') {
+    return {
+      'correct': correctCount,
+      'total': validCount,
+      'accuracy': accuracy,
+    };
+  }
+
+  // 自由练习：每日加分次数，原子自增当日轮次，拿到本次是当天第几轮
+  const dailyAwardLimit = 5;
+  const double awardRatio = 0.90; // 正确率需“超过”90%
+  final roundNo = await Db.withConn((conn) async {
+    await conn.execute(
+        'INSERT INTO practice_daily (user_id, practice_date, rounds) '
+        'VALUES (:userId, CURDATE(), 1) '
+        'ON DUPLICATE KEY UPDATE rounds = rounds + 1',
+        {'userId': userId});
+    final res = await conn.execute(
+        'SELECT rounds FROM practice_daily '
+        'WHERE user_id = :userId AND practice_date = CURDATE()',
+        {'userId': userId});
+    return (res.rows.first.typedAssoc()['rounds'] as num).toInt();
+  });
+
+  late final Map<String, dynamic> points;
+  if (roundNo > dailyAwardLimit) {
+    points = {
+      'changed': 0,
+      'reason': '今日 $dailyAwardLimit 次加分机会已用完，继续加油',
+    };
+  } else if (accuracy > awardRatio) {
+    points = await _awardPoints(
+        userId, 3, '自由练习正确率${(accuracy * 100).toStringAsFixed(0)}%，奖励+3分', grade, 0);
+  } else {
+    points = {
+      'changed': 0,
+      'reason': '正确率未超过90%，本次不加分',
+    };
+  }
+
+  return {
+    'correct': correctCount,
+    'total': validCount,
+    'accuracy': accuracy,
+    'roundNo': roundNo,
+    'points': points,
+  };
+}
+
 // ---------- 历史成绩 ----------
 
 Future<Map<String, dynamic>> history(RouteContext ctx) async {
   final user = await requireUser(ctx.request.headers);
-  final limit = int.tryParse(ctx.query['limit'] ?? '50')?.clamp(1, 200) ?? 50;
+  final limit = int.tryParse(ctx.query['limit'] ?? '50')?.clamp(1, 1000) ?? 50;
+  final wrongOnly = ctx.query['wrongOnly'] == '1';
+  final where = wrongOnly
+      ? 'user_id = :userId AND correct = 0'
+      : 'user_id = :userId';
 
-  final rows = await Db.withConn((conn) async {
+  final result = await Db.withConn((conn) async {
+    final countRes = await conn.execute(
+        'SELECT COUNT(*) AS total FROM records WHERE $where',
+        {'userId': user['id']});
+    final total = (countRes.rows.first.typedAssoc()['total'] as num).toInt();
     final res = await conn.execute(
         'SELECT expression, answer, user_answer, correct, mode, grade, created_at '
-        'FROM records WHERE user_id = :userId ORDER BY created_at DESC LIMIT :limit',
+        'FROM records WHERE $where ORDER BY created_at DESC LIMIT :limit',
         {'userId': user['id'], 'limit': limit});
-    return res.rows;
+    return (total: total, rows: res.rows);
   });
-  return {'records': rows.map((r) => _recordMap(r.typedAssoc())).toList()};
+  return {
+    'records': result.rows.map((r) => _recordMap(r.typedAssoc())).toList(),
+    'total': result.total,
+  };
 }
 
 Map<String, dynamic> _recordMap(Map<String, dynamic> row) {
@@ -343,7 +499,7 @@ Future<Map<String, dynamic>> stats(RouteContext ctx) async {
 
 // ---------- 闯关进度 ----------
 
-const int _challengeLevelsPerGrade = 5;
+const int _challengeLevelsPerGrade = 10;
 const double _passRatio = 0.7;
 const double _threeStarRatio = 0.9;
 
@@ -400,7 +556,7 @@ Future<Map<String, dynamic>> completeChallenge(RouteContext ctx) async {
 
   _checkGrade(grade);
   if (level < 1 || level > _challengeLevelsPerGrade) {
-    throw const ApiError(400, '关卡需为 1-5');
+    throw ApiError(400, '关卡需为 1-$_challengeLevelsPerGrade');
   }
   if (total < 1 || correct < 0 || correct > total) {
     throw const ApiError(400, '提交的答题数据不合法');
@@ -473,7 +629,7 @@ Future<Map<String, dynamic>> quitChallenge(RouteContext ctx) async {
   final level = _int(ctx.body['level']);
   _checkGrade(grade);
   if (level < 1 || level > _challengeLevelsPerGrade) {
-    throw const ApiError(400, '关卡需为 1-5');
+    throw ApiError(400, '关卡需为 1-$_challengeLevelsPerGrade');
   }
   final points = await _awardPoints(
       user['id'] as int, -5, '闯关中途退出，扣5分', grade, level);
@@ -835,13 +991,21 @@ Future<Map<String, dynamic>> childHistory(RouteContext ctx) async {
     throw const ApiError(404, '孩子不存在');
   }
 
-  final limit = int.tryParse(ctx.query['limit'] ?? '50')?.clamp(1, 200) ?? 50;
-  final records = await Db.withConn((conn) async {
+  final limit = int.tryParse(ctx.query['limit'] ?? '50')?.clamp(1, 1000) ?? 50;
+  final wrongOnly = ctx.query['wrongOnly'] == '1';
+  final where = wrongOnly
+      ? 'user_id = :childId AND correct = 0'
+      : 'user_id = :childId';
+  final result = await Db.withConn((conn) async {
+    final countRes = await conn.execute(
+        'SELECT COUNT(*) AS total FROM records WHERE $where',
+        {'childId': childId});
+    final total = (countRes.rows.first.typedAssoc()['total'] as num).toInt();
     final res = await conn.execute(
         'SELECT expression, answer, user_answer, correct, mode, grade, created_at '
-        'FROM records WHERE user_id = :childId ORDER BY created_at DESC LIMIT :limit',
+        'FROM records WHERE $where ORDER BY created_at DESC LIMIT :limit',
         {'childId': childId, 'limit': limit});
-    return res.rows;
+    return (total: total, rows: res.rows);
   });
 
   final childRow = rows.first.typedAssoc();
@@ -852,6 +1016,7 @@ Future<Map<String, dynamic>> childHistory(RouteContext ctx) async {
       'nickname': childRow['nickname'],
       'grade': childRow['grade'],
     },
-    'records': records.map((r) => _recordMap(r.typedAssoc())).toList(),
+    'records': result.rows.map((r) => _recordMap(r.typedAssoc())).toList(),
+    'total': result.total,
   };
 }

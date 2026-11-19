@@ -89,11 +89,20 @@ class AppConfig {
     return fallback;
   }
 
+  /// 是否为线上 release 运行（AOT 编译产物 / Docker 镜像）。
+  /// - IDE 里 `dart run` / `dart --enable-asserts` → false（debug）
+  /// - `dart build cli` / `dart compile exe` 编译产物 → true（release）
+  static const bool isRelease = bool.fromEnvironment('dart.vm.product');
+
   static AppConfig fromEnv() {
     final fileEnv = _loadEnvFile();
+    // 端口只认系统环境变量（Docker 由 env_file 注入 PORT=8082），不读 .env 文件，
+    // 否则 .env 里的 PORT=8082 会让本地 debug 也变成 8082。
+    // 未注入时按运行模式取默认：debug(本地 IDE)=9001，release(AOT/Docker)=8082。
+    final portValue = Platform.environment['PORT'] ?? (isRelease ? '8082' : '9001');
     return AppConfig(
       host: _env('HOST', '0.0.0.0', fileEnv),
-      port: int.tryParse(_env('PORT', '8082', fileEnv)) ?? 8082,
+      port: int.tryParse(portValue.trim()) ?? (isRelease ? 8082 : 9001),
       dbHost: _env('DB_HOST', '127.0.0.1', fileEnv),
       dbPort: int.tryParse(_env('DB_PORT', '3306', fileEnv)) ?? 3306,
       dbUser: _env('DB_USER', 'root', fileEnv),

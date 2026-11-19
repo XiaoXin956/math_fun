@@ -2,7 +2,7 @@ import 'package:bloc/bloc.dart';
 
 import '../api/api_client.dart';
 import '../models/models.dart';
-import '../services/session.dart';
+import '../services/session.dart' show SavedAccount, Session;
 
 /// 认证与会话状态：登录、注册、退出、从本地会话恢复、刷新用户（含积分）。
 class AuthState {
@@ -77,6 +77,29 @@ class AuthCubit extends Cubit<AuthState> {
     }
     await Session.clear();
     emit(const AuthState());
+  }
+
+  /// 切换到本地记住的另一个账号。
+  Future<bool> switchAccount(SavedAccount account) async {
+    // 保留当前 user，避免首页在切换瞬间闪回“正在加载…”
+    emit(AuthState(user: state.user, isLoading: true));
+    final user = await Session.switchTo(_client, account);
+    if (user == null) {
+      emit(AuthState(user: state.user, error: '该账号登录状态已失效，请重新登录'));
+      return false;
+    }
+    // 用新 token 验证账号有效，并拉取最新用户信息（如积分）
+    try {
+      final res = await _client.get('/api/auth/me');
+      final fresh = User.fromJson(res['user'] as Map<String, dynamic>);
+      emit(AuthState(user: fresh));
+    } catch (_) {
+      // token 已失效：清空会话，回到登录页
+      await Session.clear();
+      emit(const AuthState(error: '该账号登录已过期，请重新登录'));
+      return false;
+    }
+    return true;
   }
 
   /// 重新拉取当前用户（积分变动后调用，让首页等同步更新）。

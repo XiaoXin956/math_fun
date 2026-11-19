@@ -29,6 +29,9 @@ void main() async {
   // 题目与判分
   router.add('POST', '/api/questions', generateQuestions);
   router.add('POST', '/api/results', submitResult);
+  // 自由练习：一次下发全部题目+答案，本地判分，最后批量上报
+  router.add('POST', '/api/practice/questions', practiceQuestions);
+  router.add('POST', '/api/practice/results', practiceResults);
   router.add('GET', '/api/history', history);
   router.add('GET', '/api/stats', stats);
 

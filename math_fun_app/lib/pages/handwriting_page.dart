@@ -132,7 +132,8 @@ class _HandwritingPageState extends State<HandwritingPage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: _playing
-              ? Column(
+              ? SingleChildScrollView(
+                  child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Text(
@@ -182,7 +183,8 @@ class _HandwritingPageState extends State<HandwritingPage> {
                           style: const TextStyle(
                               fontSize: 18, fontWeight: FontWeight.bold)),
                     ],
-                  ])
+                  ]),
+                )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [

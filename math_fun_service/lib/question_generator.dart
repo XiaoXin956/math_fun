@@ -127,8 +127,10 @@ Op? _parseOp(String? s) {
       final d = _randInt(2, 9);
       final qMax = (cfg.maxResult / d).floor().clamp(2, 9);
       final q = _randInt(2, qMax);
-      value = d * q;
-      expression = '$value ÷ $d';
+      final dividend = d * q;
+      expression = '$dividend ÷ $d';
+      // 表达式的计算结果是商 q，value 必须同步为 q，否则后续运算会基于被除数出错
+      value = q;
       i++;
       retries = 0;
       continue;
@@ -162,7 +164,9 @@ int? _makeOperand(Op op, GradeConfig cfg, int value) {
       if (value < 1) return null;
       return _randInt(1, value);
     case Op.mul:
-      final room = (cfg.maxResult / value.toDouble()).floor();
+      // value 可能为 0（前序减法减到 0），此时不能做乘法，直接换运算
+      if (value < 1) return null;
+      final room = (cfg.maxResult / value).floor();
       if (room < 2) return null;
       return _randInt(2, room.clamp(2, 9));
     case Op.div:

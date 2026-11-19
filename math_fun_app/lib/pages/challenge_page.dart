@@ -8,7 +8,7 @@ import '../services/session.dart';
 import '../widgets/common.dart';
 import '../widgets/question_runner.dart';
 
-/// 闯关模式：每个年级 5 关，答对率 ≥70% 通关并获得星星。
+/// 闯关模式：每个年级 10 关，答对率 ≥70% 通关并获得星星。
 class ChallengePage extends StatefulWidget {
   static const routeName = '/challenge';
   const ChallengePage({super.key});
@@ -70,7 +70,7 @@ class _ChallengePageState extends State<ChallengePage> {
                   })),
               const SizedBox(height: 24),
               const Text(
-                '每个年级 5 关，正确率 ≥ 70% 即可通关 ⭐',
+                '每个年级 10 关，正确率 ≥ 70% 即可通关 ⭐',
                 style: TextStyle(fontSize: 14, color: Color(0xFF8A5A4A)),
               ),
               const SizedBox(height: 16),

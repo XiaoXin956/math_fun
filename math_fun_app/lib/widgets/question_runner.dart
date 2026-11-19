@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../api/api_client.dart';
 import '../api/config.dart';
+import '../bloc/auth_cubit.dart';
 import '../pages/login_page.dart';
 import '../services/session.dart';
 import '../widgets/common.dart';
@@ -53,6 +55,14 @@ class _QuestionRunnerState extends State<QuestionRunner> {
   int _secondsLeft = 0;
   final _startTime = DateTime.now();
 
+  // 自由练习 / 闯关：一次性下发全部题目+答案，本地判分，最后批量上报
+  List<Map<String, dynamic>> _batch = [];
+  int _batchIndex = 0;
+  final List<Map<String, dynamic>> _batchResults = [];
+  Map<String, dynamic>? _practicePoints;
+  bool get _isBatch =>
+      widget.mode == 'practice' || widget.mode == 'challenge';
+
   ApiClient get _client => Session.createClient();
 
   @override
@@ -62,7 +72,11 @@ class _QuestionRunnerState extends State<QuestionRunner> {
       _secondsLeft = _initialSeconds();
       _startTimer();
     }
-    _loadQuestion();
+    if (_isBatch) {
+      _loadBatch();
+    } else {
+      _loadQuestion();
+    }
   }
 
   int _initialSeconds() => timedDurationSeconds;
@@ -113,6 +127,32 @@ class _QuestionRunnerState extends State<QuestionRunner> {
     }
   }
 
+  /// 自由练习：一次请求拉取全部题目（含答案），答题过程无需再访问网络。
+  Future<void> _loadBatch() async {
+    setState(() {
+      _question = null;
+      _feedback = '';
+    });
+    try {
+      final res = await _client.post('/api/practice/questions', {
+        'grade': widget.grade,
+        'operation': widget.operation,
+        'count': widget.totalQuestions ?? 10,
+      });
+      final questions = res['questions'] as List;
+      if (!mounted) return;
+      setState(() {
+        _batch = questions.cast<Map<String, dynamic>>();
+        _batchIndex = 0;
+        _question = _batch.isEmpty ? null : _batch.first;
+        _feedback = '';
+      });
+      _focus.requestFocus();
+    } catch (e) {
+      _handleError(e);
+    }
+  }
+
   Future<void> _submit() async {
     final text = _controller.text.trim();
     final answer = int.tryParse(text);
@@ -124,6 +164,11 @@ class _QuestionRunnerState extends State<QuestionRunner> {
       });
       return;
     }
+    if (_isBatch) {
+      _submitLocal(answer);
+      return;
+    }
+
     setState(() {
       _busy = true;
       _feedback = '判分中…';
@@ -163,6 +208,68 @@ class _QuestionRunnerState extends State<QuestionRunner> {
     }
   }
 
+  /// 自由练习：用已下发的答案本地即时判分，无网络等待；全部答完再批量上报。
+  void _submitLocal(int answer) {
+    if (_question == null) return;
+    final correctAnswer = _question!['answer'] as int;
+    final correct = answer == correctAnswer;
+
+    _batchResults.add({
+      'question_id': _question!['id'],
+      'user_answer': answer,
+      'duration_ms': DateTime.now().difference(_startTime).inMilliseconds,
+    });
+
+    setState(() {
+      _feedbackCorrect = correct;
+      _feedback = correct
+          ? '太棒了，答对了！🎉'
+          : '没关系，正确答案是 $correctAnswer，再试一次！';
+      _answered++;
+      if (correct) _correctCount++;
+    });
+
+    if (_answered >= _batch.length) {
+      _finishBatch();
+      return;
+    }
+    _batchIndex++;
+    _controller.clear();
+    setState(() => _question = _batch[_batchIndex]);
+    _focus.requestFocus();
+  }
+
+  /// 自由练习全部答完：一次性把本地判分结果上报后端入库，再弹结算窗。
+  Future<void> _finishBatch() async {
+    setState(() => _busy = true);
+    try {
+      final res = await _client.post('/api/practice/results', {
+        'grade': widget.grade,
+        'mode': widget.mode,
+        'results': _batchResults,
+      });
+      // 仅自由练习有 practice 积分；闯关积分由 completeChallenge 负责
+      final p = res['points'];
+      if (p is Map<String, dynamic>) {
+        _practicePoints = p;
+        if ((p['changed'] as int? ?? 0) != 0 && mounted) {
+          context.read<AuthCubit>().refresh();
+        }
+      }
+    } catch (e) {
+      // 上报失败不阻塞结算展示，但要提示用户
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('成绩上报失败，本次记录可能未保存')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    _finish();
+  }
+
   void _finish() {
     _finished = true;
     _timer?.cancel();
@@ -173,11 +280,18 @@ class _QuestionRunnerState extends State<QuestionRunner> {
       'correct': _correctCount,
       'total': _answered,
       'seconds': DateTime.now().difference(_startTime).inSeconds,
+      if (_practicePoints != null) 'points': _practicePoints,
     };
     if (widget.onComplete != null) {
       widget.onComplete!(summary);
     } else {
-      showSummaryDialog(context, summary);
+      // 自由练习等无外部回调的模式：弹结算窗，用户确认后自动关闭答题页返回上一级。
+      // （此前只关了弹窗，答题页停留在最后一题，用户需手动按返回键）
+      showSummaryDialog(context, summary).then((_) {
+        if (!mounted) return;
+        final navigator = Navigator.of(context);
+        if (navigator.canPop()) navigator.pop();
+      });
     }
   }
 
@@ -271,7 +385,20 @@ class _QuestionRunnerState extends State<QuestionRunner> {
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: _question == null
-                    ? const Center(child: Text('正在出题…'))
+                    ? const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            height: 40,
+                            width: 40,
+                            child: CircularProgressIndicator(strokeWidth: 3),
+                          ),
+                          SizedBox(height: 12),
+                          Text('正在出题…',
+                              style: TextStyle(
+                                  fontSize: 18, color: Color(0xFF8A5A4A))),
+                        ],
+                      )
                     : Text(
                         _question!['expression'] as String,
                         textAlign: TextAlign.center,
@@ -318,10 +445,17 @@ class _QuestionRunnerState extends State<QuestionRunner> {
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _busy ? null : _submit,
-                child: Text(
-                  _question == null ? '等待出题…' : '提交答案',
-                  style: const TextStyle(fontSize: 20),
-                ),
+                // 自由练习最后一题提交后进入批量上报，按钮切换为加载框
+                child: _isBatch && _busy
+                    ? const SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      )
+                    : Text(
+                        _question == null ? '等待出题…' : '提交答案',
+                        style: const TextStyle(fontSize: 20),
+                      ),
               ),
               if (widget.mode == 'timed')
                 TextButton(

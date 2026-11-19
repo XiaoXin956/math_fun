@@ -94,28 +94,40 @@ docker compose up -d --build
 
 需要本机安装 Dart SDK（3.3+），并有一个可连接的 MySQL（本地或远程均可）。
 
-在 `math_fun_service/.env` 中配置数据库连接（该文件已被 .gitignore 忽略，不会提交到仓库）：
+> **配置来源**：服务端只从**进程环境变量**读取配置（`DB_HOST`/`DB_PORT`/`DB_USER`/`DB_PASSWORD`/`DB_NAME`/`DB_SECURE`/`PORT`），不再自动读取 `.env` 文件。缺少必需变量会直接报错 `Missing required environment variable: xxx`。
+> - Docker 部署：由 compose 的 `env_file` 注入，无需手动设置。
+> - 本地 IDE / 命令行：用附带的 `start_server.ps1`（自动从 `.env` 加载环境变量），或自行 export 环境变量后再 `dart run`。
+
+连接参数写在 `math_fun_service/.env`（该文件已被 .gitignore 忽略，不会提交到仓库）：
 
 ```env
 DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=123456
-DB_NAME=math_fun
-DB_SECURE=false
+DB_PORT=13306
+DB_USER=xiaoxin
+DB_PASSWORD=12345678
+DB_NAME=math_fun_db
+DB_SECURE=true
 PORT=8082
 ```
 
-> 配置优先级：**系统环境变量 > .env 文件 > 代码默认值**。
-> 若你的 MySQL 使用 `caching_sha2_password` 认证（MySQL 8 默认）或连接远程库，需设置 `DB_SECURE=true` 启用 TLS，否则会报
+> 若 MySQL 使用 `caching_sha2_password` 认证（MySQL 8 默认）或连接远程库，需设置 `DB_SECURE=true` 启用 TLS，否则会报
 > `Auth plugin caching_sha2_password is supported only with secure connections`。
 
 首次运行会自动建表，无需手动导入 `db/schema.sql`。
 
-```bash
+本地启动（PowerShell，脚本会读 `.env` 并把 DB_HOST 指向本机 mysql）：
+
+```powershell
 cd math_fun_service
 dart pub get
-dart run lib/main.dart
+.\start_server.ps1
+```
+
+或直接用环境变量启动：
+
+```bash
+DB_HOST=127.0.0.1 DB_PORT=13306 DB_USER=xiaoxin DB_PASSWORD=12345678 \
+DB_NAME=math_fun_db DB_SECURE=true PORT=8082 dart run lib/main.dart
 ```
 
 服务启动后会打印 `[db] MySQL 连接成功: host:port/db` 与监听地址。

@@ -138,13 +138,34 @@ Future<void> showSummaryDialog(
               '正确率：${(ratio * 100).toStringAsFixed(0)}%',
               style: const TextStyle(fontSize: 16),
             ),
+            if (summary['points'] is Map<String, dynamic>)
+              Builder(builder: (context) {
+                final pts = summary['points'] as Map<String, dynamic>;
+                final changed = pts['changed'] as int? ?? 0;
+                final reason = pts['reason'] as String? ?? '';
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    changed > 0
+                        ? '积分 +$changed（$reason）'
+                        : reason.isNotEmpty
+                            ? reason
+                            : '本次不加分',
+                    style: TextStyle(
+                        fontSize: 15,
+                        color: changed > 0
+                            ? const Color(0xFF2E9E5B)
+                            : const Color(0xFF8A5A4A)),
+                  ),
+                );
+              }),
             if (passed)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
                 child: Text(
                   '闯关成功，获得星星 ⭐',
                   style: TextStyle(
-                      fontSize: 16, color: const Color(0xFFE8842C)),
+                      fontSize: 16, color: Color(0xFFE8842C)),
                 ),
               ),
           ],

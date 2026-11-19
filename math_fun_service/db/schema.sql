@@ -91,6 +91,15 @@ CREATE TABLE IF NOT EXISTS points_records (
   INDEX idx_user_level (user_id, grade, level)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 自由练习每日次数统计（每天每用户一行，用于限制每日加分次数）
+CREATE TABLE IF NOT EXISTS practice_daily (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  practice_date DATE NOT NULL,
+  rounds INT NOT NULL DEFAULT 0,
+  UNIQUE KEY uniq_user_date (user_id, practice_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- 手写答案提交（等待家长批改）
 CREATE TABLE IF NOT EXISTS handwriting_submissions (
   id INT AUTO_INCREMENT PRIMARY KEY,

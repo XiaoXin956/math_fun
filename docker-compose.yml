@@ -35,9 +35,14 @@ services:
     image: math_fun_service
     container_name: math_fun_service
     restart: unless-stopped
-    # 用 .env 注入 DB_HOST / DB_PORT / DB_USER / DB_PASSWORD / DB_NAME /
-    # DB_SECURE / PORT / HOST 等配置（不要用内联 environment 覆盖远程库地址）
+    # 用 .env 注入 DB_USER / DB_PASSWORD / DB_NAME / DB_SECURE / PORT 等配置
     env_file:
       - ./math_fun_service/.env
+    # 数据库在本机 mysql 容器，已加入本 compose 网络，用容器名直连最稳定。
+    # environment 优先级高于 env_file，覆盖 .env 中连不通的 DB_HOST/DB_PORT。
+    # 容器间通信走 mysql 容器内部端口 3306（不经宿主机 13306 映射）。
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
     ports:
       - "8082:8082"
