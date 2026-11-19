@@ -1,6 +1,4 @@
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
+import 'package:dio/dio.dart';
 
 class ApiException implements Exception {
   final int status;
@@ -11,53 +9,77 @@ class ApiException implements Exception {
   String toString() => 'ApiException($status, $message)';
 }
 
-/// 后端 API 客户端：统一 JSON 收发与 token 注入。
+/// 后端 API 客户端：基于 Dio 的统一 JSON 收发与 token 注入。
+/// 对外保持 post/get 两个方法，页面与 Cubit 的调用方式不变。
 class ApiClient {
-  final String baseUrl;
+  final Dio _dio;
 
-  ApiClient(this.baseUrl);
+  ApiClient(String baseUrl) {
+    _dio = Dio(BaseOptions(
+      baseUrl: baseUrl,
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+      headers: const <String, String>{
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+    ));
+  }
 
   String? _token;
 
   void setToken(String? token) => _token = token;
 
-  Uri _uri(String path, Map<String, String>? query) {
-    final map = query?.map((k, v) => MapEntry(Uri.encodeComponent(k), Uri.encodeComponent(v))) ??
-        <String, String>{};
-    return Uri.parse('$baseUrl$path').replace(queryParameters: map.isEmpty ? null : map);
-  }
-
-  Map<String, String> _headers() {
-    final h = <String, String>{
-      'Content-Type': 'application/json; charset=utf-8',
-    };
+  Options _options() {
+    final headers = <String, String>{};
     if (_token != null && _token!.isNotEmpty) {
-      h['Authorization'] = 'Bearer $_token';
+      headers['Authorization'] = 'Bearer $_token';
     }
-    return h;
+    return Options(headers: headers);
   }
 
-  Future<Map<String, dynamic>> _request(
-      http.ClientFunction func, String path,
-      {Map<String, String>? query, Object? body}) async {
-    final response = await func(_uri(path, query), headers: _headers(),
-        body: body == null ? null : jsonEncode(body));
-    final status = response.statusCode;
-    final text = response.body ?? '';
-    Map<String, dynamic> data = {};
-    if (text.isNotEmpty) {
-      final decoded = jsonDecode(text);
-      if (decoded is Map<String, dynamic>) data = decoded;
+  Map<String, dynamic> _handle(Response<dynamic> response) {
+    final data = response.data;
+    if (data is Map<String, dynamic>) {
+      return data;
     }
-    if (status < 200 || status >= 300) {
-      throw ApiException(status, data['error'] as String? ?? '请求失败（$status）');
-    }
-    return data;
+    return <String, dynamic>{};
   }
 
-  Future<Map<String, dynamic>> post(String path, Object? body) =>
-      _request(http.post, path, body: body);
+  ApiException _toException(Object e) {
+    if (e is DioException) {
+      final status = e.response?.statusCode ?? 0;
+      String message = '请求失败（$status）';
+      final data = e.response?.data;
+      if (data is Map<String, dynamic> && data['error'] is String) {
+        message = data['error'] as String;
+      } else if (e.type == DioExceptionType.cancel) {
+        message = '请求已取消';
+      } else if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout) {
+        message = '网络连接失败，请检查后端服务是否启动';
+      }
+      return ApiException(status, message);
+    }
+    return ApiException(0, '请求失败');
+  }
 
-  Future<Map<String, dynamic>> get(String path, {Map<String, String>? query}) =>
-      _request(http.get, path, query: query);
+  Future<Map<String, dynamic>> post(String path, Object? body) async {
+    try {
+      final response = await _dio.post(path, data: body, options: _options());
+      return _handle(response);
+    } catch (e) {
+      throw _toException(e);
+    }
+  }
+
+  Future<Map<String, dynamic>> get(
+      String path, {Map<String, String>? query}) async {
+    try {
+      final response =
+          await _dio.get(path, queryParameters: query, options: _options());
+      return _handle(response);
+    } catch (e) {
+      throw _toException(e);
+    }
+  }
 }
