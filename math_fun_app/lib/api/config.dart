@@ -2,9 +2,9 @@
 ///
 /// 默认值适用于 Android 模拟器访问宿主机上的后端（10.0.2.2 即模拟器视角的宿主机）。
 /// 真机调试或连接其它机器的后端时，请修改下面的地址，例如：
-///   dart run 时通过环境变量：apiBaseUrl=http://192.168.1.10:8080 （需自行读取，此处保持简单）
-/// 直接改为对应的 IP 即可，如 'http://192.168.1.10:8080'。
-const String apiBaseUrl = 'http://10.0.2.2:8080';
+///   dart run 时通过环境变量：apiBaseUrl=http://192.168.1.10:8082 （需自行读取，此处保持简单）
+/// 直接改为对应的 IP 即可，如 'http://192.168.1.10:8082'。
+const String apiBaseUrl = 'http://10.0.2.2:8082';
 
 /// 限时挑战的默认时长（秒）。
 const int timedDurationSeconds = 60;

@@ -79,7 +79,7 @@ docker compose up -d --build
 
 启动后：
 
-- 后端服务 `math_fun_service`：http://localhost:8080
+- 后端服务 `math_fun_service`：http://localhost:8082
 - MySQL：容器 `math_fun_db`，数据库 `math_fun`
 
 演示账号（密码均为 `123456`，生产环境请修改）：
@@ -102,7 +102,7 @@ DB_USER=root
 DB_PASSWORD=123456
 DB_NAME=math_fun
 DB_SECURE=false
-PORT=8080
+PORT=8082
 ```
 
 > 配置优先级：**系统环境变量 > .env 文件 > 代码默认值**。
@@ -131,9 +131,9 @@ flutter pub get
 flutter run
 ```
 
-> **重要**：默认后端地址是 `http://10.0.2.2:8080`（Android 模拟器访问宿主机）。
+> **重要**：默认后端地址是 `http://10.0.2.2:8082`（Android 模拟器访问宿主机）。
 > 真机调试请修改 `math_fun_app/lib/api/config.dart` 中的 `apiBaseUrl` 为后端所在机器的 IP，例如
-> `http://192.168.1.10:8080`。
+> `http://192.168.1.10:8082`。
 
 ## 状态管理（BLoC）
 

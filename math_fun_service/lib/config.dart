@@ -93,7 +93,7 @@ class AppConfig {
     final fileEnv = _loadEnvFile();
     return AppConfig(
       host: _env('HOST', '0.0.0.0', fileEnv),
-      port: int.tryParse(_env('PORT', '8080', fileEnv)) ?? 8080,
+      port: int.tryParse(_env('PORT', '8082', fileEnv)) ?? 8082,
       dbHost: _env('DB_HOST', '127.0.0.1', fileEnv),
       dbPort: int.tryParse(_env('DB_PORT', '3306', fileEnv)) ?? 3306,
       dbUser: _env('DB_USER', 'root', fileEnv),

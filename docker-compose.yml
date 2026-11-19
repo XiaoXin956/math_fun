@@ -26,9 +26,9 @@ services:
       DB_USER: root
       DB_PASSWORD: math_fun_root
       DB_NAME: math_fun
-      PORT: "8080"
+      PORT: "8082"
     ports:
-      - "8080:8080"
+      - "8082:8082"
     depends_on:
       db:
         condition: service_healthy

@@ -21,13 +21,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=builder /app/server /app/server
 
 ENV HOST=0.0.0.0 \
-    PORT=8080 \
+    PORT=8082 \
     DB_HOST=db \
     DB_PORT=3306 \
     DB_USER=root \
     DB_PASSWORD=math_fun_root \
     DB_NAME=math_fun
 
-EXPOSE 8080
+EXPOSE 8082
 
 CMD ["/app/server"]
