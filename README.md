@@ -3,7 +3,7 @@
 一款面向小学生的算术计算小游戏。
 
 - **前端**：Flutter 项目 `math_fun_app`，包名 `com.xiaoxin.math_fun_app`，状态管理使用 **BLoC**
-- **后端**：Dart 服务 `math_fun_service` + MySQL
+- **后端**：Dart 服务 `math_fun_service` + MySQL（数据库驱动使用 `mysql_client` 包）
 
 ## 功能
 

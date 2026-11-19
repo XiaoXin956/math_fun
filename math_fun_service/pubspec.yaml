@@ -7,7 +7,7 @@ environment:
   sdk: '>=3.3.0 <4.0.0'
 
 dependencies:
-  mysql2: ^3.0.2
+  mysql_client: ^0.0.27
   crypto: ^3.0.3
 
 dev_dependencies:

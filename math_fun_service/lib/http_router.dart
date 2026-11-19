@@ -27,7 +27,7 @@ class RouteContext {
     this.body,
   );
 
-  String header(String name) => request.headers[name] ?? '';
+  String header(String name) => request.headers[name]?.first ?? '';
 }
 
 typedef Handler = Future<dynamic> Function(RouteContext ctx);

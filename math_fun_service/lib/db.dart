@@ -1,16 +1,16 @@
-import 'package:mysql2/mysql2.dart';
+import 'package:mysql_client/mysql_client.dart';
 
 import 'config.dart';
 
-/// MySQL 连接池 + 建表逻辑。
+/// MySQL 连接池与建表逻辑，基于 mysql_client 的 MySQLConnectionPool。
 /// 启动时自动执行幂等的 CREATE TABLE IF NOT EXISTS，无需手动建库建表。
 class Db {
-  static const int _maxConnections = 8;
-  static List<MySqlConnection> _free = [];
-  static int _created = 0;
+  static MySQLConnectionPool? _pool;
   static AppConfig? _config;
 
   static AppConfig get config => _config!;
+
+  static MySQLConnectionPool get pool => _pool!;
 
   static Future<void> init(AppConfig config) async {
     _config = config;
@@ -19,9 +19,18 @@ class Db {
     final deadline = DateTime.now().add(const Duration(seconds: 45));
     while (true) {
       try {
-        final conn = await _create();
-        await conn.query('SELECT 1');
-        await conn.close();
+        _pool = MySQLConnectionPool(
+          host: config.dbHost,
+          port: config.dbPort,
+          userName: config.dbUser,
+          password: config.dbPassword,
+          databaseName: config.dbName,
+          maxConnections: 8,
+          // 内网/Docker 中的 MySQL 未配置 TLS，必须关闭加密连接
+          secure: false,
+          collation: 'utf8mb4_unicode_ci',
+        );
+        await _pool!.execute('SELECT 1');
         break;
       } catch (e) {
         if (DateTime.now().isAfter(deadline)) {
@@ -34,171 +43,124 @@ class Db {
     await _createSchema();
   }
 
-  static MySqlConnection _create() => MySqlConnection.connect(
-        MySQLConnectionSettings(
-          host: config.dbHost,
-          port: config.dbPort,
-          user: config.dbUser,
-          password: config.dbPassword,
-          database: config.dbName,
-        ),
-      );
-
-  static Future<MySqlConnection> _acquire() async {
-    if (_free.isNotEmpty) {
-      return _free.removeLast();
-    }
-    if (_created < _maxConnections) {
-      _created++;
-      return _create();
-    }
-    // 连接池打满时等待其它请求归还（简单轮询）
-    while (_free.isEmpty) {
-      await Future.delayed(const Duration(milliseconds: 50));
-    }
-    return _free.removeLast();
-  }
-
-  static void _release(MySqlConnection conn) {
-    if (_free.length < _maxConnections) {
-      _free.add(conn);
-    } else {
-      conn.close();
-    }
-  }
-
-  /// 在连接池中执行一段数据库操作，用完自动归还。
-  static Future<T> withConn<T>(Future<T> Function(MySqlConnection conn) fn) async {
-    final conn = await _acquire();
-    var broken = false;
-    try {
-      return await fn(conn);
-    } catch (e) {
-      // 连接可能已失效，丢弃重建
-      broken = true;
-      _created--;
-      conn.close();
-      rethrow;
-    } finally {
-      if (!broken) {
-        _release(conn);
-      }
-    }
+  /// 在连接池中执行一段数据库操作（mysql_client 池自动归还连接）。
+  static Future<T> withConn<T>(Future<T> Function(MySQLConnection conn) fn) async {
+    return _pool!.withConnection(fn);
   }
 
   static Future<void> _createSchema() async {
-    await withConn((conn) async {
-      await conn.query('CREATE TABLE IF NOT EXISTS users ('
-          'id INT AUTO_INCREMENT PRIMARY KEY,'
-          'username VARCHAR(32) NOT NULL UNIQUE,'
-          'password_hash VARCHAR(128) NOT NULL,'
-          'salt VARCHAR(32) NOT NULL,'
-          'nickname VARCHAR(32) NOT NULL,'
-          "role ENUM('parent','child') NOT NULL DEFAULT 'child',"
-          'grade TINYINT NULL,'
-          'parent_id INT NULL,'
-          'points INT NOT NULL DEFAULT 0,'
-          'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
-          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    final pool = _pool!;
 
-      await conn.query('CREATE TABLE IF NOT EXISTS sessions ('
-          'token VARCHAR(64) PRIMARY KEY,'
-          'user_id INT NOT NULL,'
-          'expires_at DATETIME NOT NULL,'
-          'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
-          'INDEX idx_user (user_id)'
-          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    await pool.execute('CREATE TABLE IF NOT EXISTS users ('
+        'id INT AUTO_INCREMENT PRIMARY KEY,'
+        'username VARCHAR(32) NOT NULL UNIQUE,'
+        'password_hash VARCHAR(128) NOT NULL,'
+        'salt VARCHAR(32) NOT NULL,'
+        'nickname VARCHAR(32) NOT NULL,'
+        "role ENUM('parent','child') NOT NULL DEFAULT 'child',"
+        'grade TINYINT NULL,'
+        'parent_id INT NULL,'
+        'points INT NOT NULL DEFAULT 0,'
+        'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
-      await conn.query('CREATE TABLE IF NOT EXISTS questions ('
-          'id VARCHAR(64) PRIMARY KEY,'
-          'expression VARCHAR(64) NOT NULL,'
-          'answer INT NOT NULL,'
-          'grade TINYINT NOT NULL,'
-          "type VARCHAR(20) NOT NULL DEFAULT 'math',"
-          'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
-          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    await pool.execute('CREATE TABLE IF NOT EXISTS sessions ('
+        'token VARCHAR(64) PRIMARY KEY,'
+        'user_id INT NOT NULL,'
+        'expires_at DATETIME NOT NULL,'
+        'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
+        'INDEX idx_user (user_id)'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
-      await conn.query('CREATE TABLE IF NOT EXISTS records ('
-          'id INT AUTO_INCREMENT PRIMARY KEY,'
-          'user_id INT NOT NULL,'
-          'question_id VARCHAR(64) NOT NULL,'
-          'expression VARCHAR(64) NOT NULL,'
-          'answer INT NOT NULL,'
-          'user_answer INT NOT NULL,'
-          'correct TINYINT NOT NULL DEFAULT 0,'
-          "mode VARCHAR(20) NOT NULL DEFAULT 'practice',"
-          'grade TINYINT NOT NULL,'
-          'duration_ms INT NOT NULL DEFAULT 0,'
-          'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
-          'INDEX idx_user_time (user_id, created_at)'
-          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    await pool.execute('CREATE TABLE IF NOT EXISTS questions ('
+        'id VARCHAR(64) PRIMARY KEY,'
+        'expression VARCHAR(64) NOT NULL,'
+        'answer INT NOT NULL,'
+        'grade TINYINT NOT NULL,'
+        "type VARCHAR(20) NOT NULL DEFAULT 'math',"
+        'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
-      await conn.query('CREATE TABLE IF NOT EXISTS challenge_progress ('
-          'id INT AUTO_INCREMENT PRIMARY KEY,'
-          'user_id INT NOT NULL,'
-          'grade TINYINT NOT NULL,'
-          'level TINYINT NOT NULL,'
-          'best_correct INT NOT NULL DEFAULT 0,'
-          'best_total INT NOT NULL DEFAULT 0,'
-          'best_stars TINYINT NOT NULL DEFAULT 0,'
-          'updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
-          ' ON UPDATE CURRENT_TIMESTAMP,'
-          'UNIQUE KEY uniq_user_grade_level (user_id, grade, level)'
-          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    await pool.execute('CREATE TABLE IF NOT EXISTS records ('
+        'id INT AUTO_INCREMENT PRIMARY KEY,'
+        'user_id INT NOT NULL,'
+        'question_id VARCHAR(64) NOT NULL,'
+        'expression VARCHAR(64) NOT NULL,'
+        'answer INT NOT NULL,'
+        'user_answer INT NOT NULL,'
+        'correct TINYINT NOT NULL DEFAULT 0,'
+        "mode VARCHAR(20) NOT NULL DEFAULT 'practice',"
+        'grade TINYINT NOT NULL,'
+        'duration_ms INT NOT NULL DEFAULT 0,'
+        'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
+        'INDEX idx_user_time (user_id, created_at)'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
-      await conn.query('CREATE TABLE IF NOT EXISTS timed_best ('
-          'id INT AUTO_INCREMENT PRIMARY KEY,'
-          'user_id INT NOT NULL,'
-          'grade TINYINT NOT NULL,'
-          'best_score INT NOT NULL DEFAULT 0,'
-          'best_correct INT NOT NULL DEFAULT 0,'
-          'played_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
-          ' ON UPDATE CURRENT_TIMESTAMP,'
-          'UNIQUE KEY uniq_user_grade (user_id, grade)'
-          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    await pool.execute('CREATE TABLE IF NOT EXISTS challenge_progress ('
+        'id INT AUTO_INCREMENT PRIMARY KEY,'
+        'user_id INT NOT NULL,'
+        'grade TINYINT NOT NULL,'
+        'level TINYINT NOT NULL,'
+        'best_correct INT NOT NULL DEFAULT 0,'
+        'best_total INT NOT NULL DEFAULT 0,'
+        'best_stars TINYINT NOT NULL DEFAULT 0,'
+        'updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
+        ' ON UPDATE CURRENT_TIMESTAMP,'
+        'UNIQUE KEY uniq_user_grade_level (user_id, grade, level)'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
-      // 积分记录表
-      await conn.query('CREATE TABLE IF NOT EXISTS points_records ('
-          'id INT AUTO_INCREMENT PRIMARY KEY,'
-          'user_id INT NOT NULL,'
-          'grade TINYINT NOT NULL DEFAULT 0,'
-          'level TINYINT NOT NULL DEFAULT 0,'
-          'change INT NOT NULL,'
-          'reason VARCHAR(128) NOT NULL,'
-          'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
-          'INDEX idx_user_time (user_id, created_at),'
-          'INDEX idx_user_level (user_id, grade, level)'
-          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    await pool.execute('CREATE TABLE IF NOT EXISTS timed_best ('
+        'id INT AUTO_INCREMENT PRIMARY KEY,'
+        'user_id INT NOT NULL,'
+        'grade TINYINT NOT NULL,'
+        'best_score INT NOT NULL DEFAULT 0,'
+        'best_correct INT NOT NULL DEFAULT 0,'
+        'played_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
+        ' ON UPDATE CURRENT_TIMESTAMP,'
+        'UNIQUE KEY uniq_user_grade (user_id, grade)'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
-      // 手写答案提交表（等待家长批改）
-      await conn.query('CREATE TABLE IF NOT EXISTS handwriting_submissions ('
-          'id INT AUTO_INCREMENT PRIMARY KEY,'
-          'user_id INT NOT NULL,'
-          'question_id VARCHAR(64) NOT NULL,'
-          'expression VARCHAR(64) NOT NULL,'
-          'answer INT NOT NULL,'
-          'image LONGTEXT NOT NULL,'
-          'status ENUM("pending","reviewed") NOT NULL DEFAULT "pending",'
-          'reviewed_by INT NULL,'
-          'review_change INT NULL,'
-          'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
-          'reviewed_at DATETIME NULL,'
-          'INDEX idx_user (user_id),'
-          'INDEX idx_status (status)'
-          ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    // 积分记录表
+    await pool.execute('CREATE TABLE IF NOT EXISTS points_records ('
+        'id INT AUTO_INCREMENT PRIMARY KEY,'
+        'user_id INT NOT NULL,'
+        'grade TINYINT NOT NULL DEFAULT 0,'
+        'level TINYINT NOT NULL DEFAULT 0,'
+        'change INT NOT NULL,'
+        'reason VARCHAR(128) NOT NULL,'
+        'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
+        'INDEX idx_user_time (user_id, created_at),'
+        'INDEX idx_user_level (user_id, grade, level)'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
-      // 兼容旧库：补充后来新增的字段（新库建表时已包含，重复执行报错则忽略）
-      try {
-        await conn.query('ALTER TABLE users ADD COLUMN points INT NOT NULL DEFAULT 0');
-      } catch (_) {}
-      try {
-        await conn.query(
-            "ALTER TABLE questions ADD COLUMN type VARCHAR(20) NOT NULL DEFAULT 'math'");
-      } catch (_) {}
+    // 手写答案提交表（等待家长批改）
+    await pool.execute('CREATE TABLE IF NOT EXISTS handwriting_submissions ('
+        'id INT AUTO_INCREMENT PRIMARY KEY,'
+        'user_id INT NOT NULL,'
+        'question_id VARCHAR(64) NOT NULL,'
+        'expression VARCHAR(64) NOT NULL,'
+        'answer INT NOT NULL,'
+        'image LONGTEXT NOT NULL,'
+        'status ENUM("pending","reviewed") NOT NULL DEFAULT "pending",'
+        'reviewed_by INT NULL,'
+        'review_change INT NULL,'
+        'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
+        'reviewed_at DATETIME NULL,'
+        'INDEX idx_user (user_id),'
+        'INDEX idx_status (status)'
+        ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
-      // 清理过期题目（7 天前的临时题目记录）
-      await conn.query(
-          "DELETE FROM questions WHERE created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)");
-    });
+    // 兼容旧库：补充后来新增的字段（新库建表时已包含，重复执行报错则忽略）
+    try {
+      await pool.execute('ALTER TABLE users ADD COLUMN points INT NOT NULL DEFAULT 0');
+    } catch (_) {}
+    try {
+      await pool.execute(
+          "ALTER TABLE questions ADD COLUMN type VARCHAR(20) NOT NULL DEFAULT 'math'");
+    } catch (_) {}
+
+    // 清理过期题目（7 天前的临时题目记录）
+    await pool.execute(
+        "DELETE FROM questions WHERE created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)");
   }
 }

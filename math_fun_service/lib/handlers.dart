@@ -1,4 +1,4 @@
-import 'package:mysql2/mysql2.dart';
+import 'package:mysql_client/mysql_client.dart';
 
 import 'auth.dart';
 import 'db.dart';
@@ -34,6 +34,14 @@ String _str(Map<String, dynamic> body, String key) {
   return v is String ? v.trim() : '';
 }
 
+/// mysql_client 的 typedAssoc() 可能把 DATETIME 映射为 DateTime，
+/// 也可能保留字符串，统一处理成 ISO 字符串。
+String _isoDateTime(dynamic v) {
+  if (v is DateTime) return v.toIso8601String();
+  final dt = DateTime.tryParse('$v');
+  return dt == null ? '' : dt.toIso8601String();
+}
+
 // ---------- 认证 ----------
 
 Future<Map<String, dynamic>> register(RouteContext ctx) async {
@@ -59,11 +67,18 @@ Future<Map<String, dynamic>> register(RouteContext ctx) async {
   final hash = hashPassword(salt, password);
 
   final result = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'INSERT INTO users (username, password_hash, salt, nickname, role, grade) '
-        'VALUES (?, ?, ?, ?, ?, ?)',
-        [username, hash, salt, nickname, role, role == 'child' ? grade : null]);
-    return res.insertId;
+        'VALUES (:username, :hash, :salt, :nickname, :role, :grade)',
+        {
+          'username': username,
+          'hash': hash,
+          'salt': salt,
+          'nickname': nickname,
+          'role': role,
+          'grade': role == 'child' ? grade : null,
+        });
+    return res.lastInsertID;
   });
 
   final token = await createSession(result);
@@ -79,22 +94,22 @@ Future<Map<String, dynamic>> login(RouteContext ctx) async {
   }
 
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT id, username, nickname, role, grade, parent_id, points, salt, password_hash '
-        'FROM users WHERE username = ?',
-        [username]);
+        'FROM users WHERE username = :username',
+        {'username': username});
     return res.rows;
   });
   if (rows.isEmpty) {
     throw const ApiError(401, '用户名或密码错误');
   }
-  final row = rows.first;
-  final hash = hashPassword(row[7] as String, password);
-  if (hash != row[8]) {
+  final row = rows.first.typedAssoc();
+  final hash = hashPassword(row['salt'] as String, password);
+  if (hash != row['password_hash']) {
     throw const ApiError(401, '用户名或密码错误');
   }
 
-  final token = await createSession(row[0] as int);
+  final token = await createSession(row['id'] as int);
   return {'token': token, 'user': userMap(row)};
 }
 
@@ -103,7 +118,7 @@ Future<Map<String, dynamic>> logout(RouteContext ctx) async {
   final token = auth.startsWith('Bearer ') ? auth.substring(7).trim() : '';
   if (token.isNotEmpty) {
     await Db.withConn((conn) async {
-      await conn.query('DELETE FROM sessions WHERE token = ?', [token]);
+      await conn.execute('DELETE FROM sessions WHERE token = :token', {'token': token});
     });
   }
   return {'ok': true};
@@ -117,24 +132,24 @@ Future<Map<String, dynamic>> me(RouteContext ctx) async {
 
 Future<Map<String, dynamic>> _loadUser(int id) async {
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT id, username, nickname, role, grade, parent_id, points '
-        'FROM users WHERE id = ?',
-        [id]);
+        'FROM users WHERE id = :id',
+        {'id': id});
     return res.rows;
   });
-  return userMap(rows.first);
+  return userMap(rows.first.typedAssoc());
 }
 
 Future<List<Map<String, dynamic>>> _childrenOf(int parentId) async {
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT id, username, nickname, role, grade, parent_id, points FROM users '
-        "WHERE parent_id = ? AND role = 'child' ORDER BY id",
-        [parentId]);
+        "WHERE parent_id = :parentId AND role = 'child' ORDER BY id",
+        {'parentId': parentId});
     return res.rows;
   });
-  return rows.map(userMap).toList();
+  return rows.map((r) => userMap(r.typedAssoc())).toList();
 }
 
 // ---------- 年级配置 ----------
@@ -171,10 +186,16 @@ Future<Map<String, dynamic>> generateQuestions(RouteContext ctx) async {
   await Db.withConn((conn) async {
     for (final (expression, answer) in questions) {
       final id = newQuestionId();
-      await conn.query(
+      await conn.execute(
           'INSERT INTO questions (id, expression, answer, grade, type) '
-          'VALUES (?, ?, ?, ?, ?)',
-          [id, expression, answer, grade, type]);
+          'VALUES (:id, :expression, :answer, :grade, :type)',
+          {
+            'id': id,
+            'expression': expression,
+            'answer': answer,
+            'grade': grade,
+            'type': type,
+          });
       // 注意：不向客户端返回答案，答案只在服务端保存，判分在提交时进行
       list.add({
         'id': id,
@@ -205,35 +226,35 @@ Future<Map<String, dynamic>> submitResult(RouteContext ctx) async {
   }
 
   final row = await Db.withConn((conn) async {
-    final res = await conn.query(
-        'SELECT answer, expression, grade FROM questions WHERE id = ?',
-        [questionId]);
-    return res.rows.isEmpty ? null : res.rows.first;
+    final res = await conn.execute(
+        'SELECT answer, expression, grade FROM questions WHERE id = :qid',
+        {'qid': questionId});
+    return res.rows.isEmpty ? null : res.rows.first.typedAssoc();
   });
   if (row == null) {
     throw const ApiError(404, '题目不存在或已过期，请重新出题');
   }
 
-  final answer = row[0] as int;
-  final expression = row[1] as String;
+  final answer = row['answer'] as int;
+  final expression = row['expression'] as String;
   final correct = userAnswer == answer;
 
   await Db.withConn((conn) async {
-    await conn.query(
+    await conn.execute(
         'INSERT INTO records '
         '(user_id, question_id, expression, answer, user_answer, correct, mode, grade, duration_ms) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [
-          userId,
-          questionId,
-          expression,
-          answer,
-          userAnswer,
-          correct ? 1 : 0,
-          mode,
-          _int(row[2]),
-          durationMs,
-        ]);
+        'VALUES (:userId, :qid, :expression, :answer, :userAnswer, :correct, :mode, :grade, :durationMs)',
+        {
+          'userId': userId,
+          'qid': questionId,
+          'expression': expression,
+          'answer': answer,
+          'userAnswer': userAnswer,
+          'correct': correct ? 1 : 0,
+          'mode': mode,
+          'grade': _int(row['grade']),
+          'durationMs': durationMs,
+        });
   });
 
   return {
@@ -261,25 +282,24 @@ Future<Map<String, dynamic>> history(RouteContext ctx) async {
   final limit = int.tryParse(ctx.query['limit'] ?? '50')?.clamp(1, 200) ?? 50;
 
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT expression, answer, user_answer, correct, mode, grade, created_at '
-        'FROM records WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
-        [user['id'], limit]);
+        'FROM records WHERE user_id = :userId ORDER BY created_at DESC LIMIT :limit',
+        {'userId': user['id'], 'limit': limit});
     return res.rows;
   });
-  return {'records': rows.map(_recordMap).toList()};
+  return {'records': rows.map((r) => _recordMap(r.typedAssoc())).toList()};
 }
 
-Map<String, dynamic> _recordMap(MySqlRow row) {
-  final created = row[6] as DateTime?;
+Map<String, dynamic> _recordMap(Map<String, dynamic> row) {
   return {
-    'expression': row[0],
-    'answer': row[1],
-    'userAnswer': row[2],
-    'correct': row[3] == 1,
-    'mode': row[4],
-    'grade': row[5],
-    'createdAt': created?.toIso8601String() ?? '',
+    'expression': row['expression'],
+    'answer': row['answer'],
+    'userAnswer': row['user_answer'],
+    'correct': row['correct'] == 1,
+    'mode': row['mode'],
+    'grade': row['grade'],
+    'createdAt': _isoDateTime(row['created_at']),
   };
 }
 
@@ -296,26 +316,30 @@ Future<Map<String, dynamic>> stats(RouteContext ctx) async {
     userIds.addAll(children.map((c) => c['id'] as int));
   }
 
-  final rows = await Db.withConn((conn) async {
-    final placeholders = userIds.map((_) => '?').join(',');
-    final res = await conn.query(
+  final row = await Db.withConn((conn) async {
+    final params = <String, dynamic>{};
+    final placeholders =
+        userIds.map((id, i) {
+          params['uid$i'] = id;
+          return ':uid$i';
+        }).join(',');
+    final res = await conn.execute(
         'SELECT COUNT(*) AS total, '
         'SUM(correct = 1) AS correct, '
         'COUNT(DISTINCT user_id) AS players, '
         'SUM(mode = "timed" AND correct = 1) AS timed_correct '
         'FROM records WHERE user_id IN ($placeholders)',
-        userIds);
-    return res.rows;
+        params);
+    return res.rows.first.typedAssoc();
   });
-  final row = rows.first;
-  final total = (row[0] as num).toInt();
-  final correct = (row[1] as num).toInt();
+  final total = (row['total'] as num).toInt();
+  final correct = (row['correct'] as num).toInt();
 
   return {
     'totalAnswered': total,
     'totalCorrect': correct,
     'accuracy': total == 0 ? 0.0 : correct / total,
-    'players': (row[2] as num).toInt(),
+    'players': (row['players'] as num).toInt(),
   };
 }
 
@@ -331,15 +355,20 @@ Future<Map<String, dynamic>> challengeProgress(RouteContext ctx) async {
   _checkGrade(grade);
 
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT level, best_correct, best_total, best_stars FROM challenge_progress '
-        'WHERE user_id = ? AND grade = ?',
-        [user['id'], grade]);
+        'WHERE user_id = :userId AND grade = :grade',
+        {'userId': user['id'], 'grade': grade});
     return res.rows;
   });
 
   final best = {
-    for (final row in rows) (row[0] as int): {'correct': row[1], 'total': row[2], 'stars': row[3]}
+    for (final row in rows)
+      (row.typedColByName<int>('level')): {
+        'correct': row.typedColByName<int>('best_correct'),
+        'total': row.typedColByName<int>('best_total'),
+        'stars': row.typedColByName<int>('best_stars'),
+      }
   };
 
   final levels = <Map<String, dynamic>>[];
@@ -347,9 +376,10 @@ Future<Map<String, dynamic>> challengeProgress(RouteContext ctx) async {
     final data = best[level];
     final passed = data != null &&
         (data['correct'] as int) >= _passRatio * (data['total'] as int);
-    final unlocked = level == 1 || (best[level - 1]?.containsKey('correct') ?? false) &&
-        (best[level - 1]!['correct'] as int) >=
-            _passRatio * (best[level - 1]!['total'] as int);
+    final unlocked = level == 1 ||
+        (best[level - 1]?.containsKey('correct') ?? false) &&
+            (best[level - 1]!['correct'] as int) >=
+                _passRatio * (best[level - 1]!['total'] as int);
     levels.add({
       'level': level,
       'questions': 4 + level,
@@ -383,26 +413,33 @@ Future<Map<String, dynamic>> completeChallenge(RouteContext ctx) async {
   final stars = (accuracy >= _threeStarRatio ? 3 : (passed ? 2 : 0)) as int;
 
   await Db.withConn((conn) async {
-    await conn.query(
+    await conn.execute(
         'INSERT INTO challenge_progress (user_id, grade, level, best_correct, best_total, best_stars) '
-        'VALUES (?, ?, ?, ?, ?, ?) '
+        'VALUES (:userId, :grade, :level, :correct, :total, :stars) '
         'ON DUPLICATE KEY UPDATE '
-        'best_correct = GREATEST(best_correct, VALUES(best_correct)), '
-        'best_total = GREATEST(best_total, VALUES(best_total)), '
-        'best_stars = GREATEST(best_stars, VALUES(best_stars))',
-        [user['id'], grade, level, correct, total, stars]);
+        'best_correct = GREATEST(best_correct, :correct), '
+        'best_total = GREATEST(best_total, :total), '
+        'best_stars = GREATEST(best_stars, :stars)',
+        {
+          'userId': user['id'],
+          'grade': grade,
+          'level': level,
+          'correct': correct,
+          'total': total,
+          'stars': stars,
+        });
   });
 
   // 积分规则：成功率 >= 95% 加 3 分；80%~95% 不加不减；不足 80%（含 60%）扣 3 分
   // 同一关卡 7 天内重复挑战不再加分
   final userId = user['id'] as int;
-  final since = DateTime.now().subtract(const Duration(days: 7));
   final recentAward = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT id FROM points_records '
-        'WHERE user_id = ? AND grade = ? AND level = ? AND change > 0 AND created_at >= ? '
+        'WHERE user_id = :userId AND grade = :grade AND level = :level '
+        'AND change > 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) '
         'LIMIT 1',
-        [userId, grade, level, since]);
+        {'userId': userId, 'grade': grade, 'level': level});
     return res.rows.isNotEmpty;
   });
 
@@ -449,12 +486,19 @@ Future<Map<String, dynamic>> quitChallenge(RouteContext ctx) async {
 Future<Map<String, dynamic>> _awardPoints(
     int userId, int change, String reason, int grade, int level) async {
   await Db.withConn((conn) async {
-    await conn.query('UPDATE users SET points = points + ? WHERE id = ?',
-        [change, userId]);
-    await conn.query(
+    await conn.execute(
+        'UPDATE users SET points = points + :change WHERE id = :userId',
+        {'change': change, 'userId': userId});
+    await conn.execute(
         'INSERT INTO points_records (user_id, grade, level, change, reason) '
-        'VALUES (?, ?, ?, ?, ?)',
-        [userId, grade, level, change, reason]);
+        'VALUES (:userId, :grade, :level, :change, :reason)',
+        {
+          'userId': userId,
+          'grade': grade,
+          'level': level,
+          'change': change,
+          'reason': reason,
+        });
   });
   return {'changed': change, 'reason': reason};
 }
@@ -465,29 +509,29 @@ Future<Map<String, dynamic>> pointsHistory(RouteContext ctx) async {
   final limit = int.tryParse(ctx.query['limit'] ?? '50')?.clamp(1, 200) ?? 50;
 
   final total = await Db.withConn((conn) async {
-    final res = await conn.query('SELECT points FROM users WHERE id = ?',
-        [user['id']]);
-    return res.rows.isEmpty ? 0 : (res.rows.first[0] as num).toInt();
+    final res = await conn.execute(
+        'SELECT points FROM users WHERE id = :userId', {'userId': user['id']});
+    return res.rows.isEmpty ? 0 : (res.rows.first.typedAssoc()['points'] as int);
   });
 
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT change, reason, grade, level, created_at FROM points_records '
-        'WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
-        [user['id'], limit]);
+        'WHERE user_id = :userId ORDER BY created_at DESC LIMIT :limit',
+        {'userId': user['id'], 'limit': limit});
     return res.rows;
   });
 
   return {
     'total': total,
     'records': rows.map((row) {
-      final created = row[4] as DateTime?;
+      final r = row.typedAssoc();
       return {
-        'change': row[0],
-        'reason': row[1],
-        'grade': row[2],
-        'level': row[3],
-        'createdAt': created?.toIso8601String() ?? '',
+        'change': r['change'],
+        'reason': r['reason'],
+        'grade': r['grade'],
+        'level': r['level'],
+        'createdAt': _isoDateTime(r['created_at']),
       };
     }).toList(),
   };
@@ -503,13 +547,18 @@ Future<Map<String, dynamic>> submitTimed(RouteContext ctx) async {
   _checkGrade(grade);
 
   await Db.withConn((conn) async {
-    await conn.query(
+    await conn.execute(
         'INSERT INTO timed_best (user_id, grade, best_score, best_correct) '
-        'VALUES (?, ?, ?, ?) '
+        'VALUES (:userId, :grade, :score, :correct) '
         'ON DUPLICATE KEY UPDATE '
-        'best_score = GREATEST(best_score, VALUES(best_score)), '
-        'best_correct = GREATEST(best_correct, VALUES(best_correct))',
-        [user['id'], grade, score, correct]);
+        'best_score = GREATEST(best_score, :score), '
+        'best_correct = GREATEST(best_correct, :correct)',
+        {
+          'userId': user['id'],
+          'grade': grade,
+          'score': score,
+          'correct': correct,
+        });
   });
 
   return {'ok': true, 'score': score};
@@ -520,15 +569,19 @@ Future<Map<String, dynamic>> timedBest(RouteContext ctx) async {
   final grade = int.tryParse(ctx.query['grade'] ?? '') ?? 0;
 
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
-        'SELECT grade, best_score, best_correct FROM timed_best WHERE user_id = ?',
-        [user['id']]);
+    final res = await conn.execute(
+        'SELECT grade, best_score, best_correct FROM timed_best WHERE user_id = :userId',
+        {'userId': user['id']});
     return res.rows;
   });
   return {
     'best': rows
-        .where((r) => grade == 0 || r[0] == grade)
-        .map((r) => {'grade': r[0], 'score': r[1], 'correct': r[2]})
+        .where((r) => grade == 0 || r.typedColByName<int>('grade') == grade)
+        .map((r) => {
+              'grade': r.typedColByName<int>('grade'),
+              'score': r.typedColByName<int>('best_score'),
+              'correct': r.typedColByName<int>('best_correct'),
+            })
         .toList(),
   };
 }
@@ -550,30 +603,30 @@ Future<Map<String, dynamic>> submitHandwriting(RouteContext ctx) async {
   }
 
   final row = await Db.withConn((conn) async {
-    final res = await conn.query(
-        'SELECT expression, answer, type FROM questions WHERE id = ?',
-        [questionId]);
-    return res.rows.isEmpty ? null : res.rows.first;
+    final res = await conn.execute(
+        'SELECT expression, answer, type FROM questions WHERE id = :qid',
+        {'qid': questionId});
+    return res.rows.isEmpty ? null : res.rows.first.typedAssoc();
   });
   if (row == null) {
     throw const ApiError(404, '题目不存在或已过期，请重新出题');
   }
-  if (row[2] != 'handwriting') {
+  if (row['type'] != 'handwriting') {
     throw const ApiError(400, '该题目不是手写题');
   }
 
   await Db.withConn((conn) async {
-    await conn.query(
+    await conn.execute(
         'INSERT INTO handwriting_submissions '
         '(user_id, question_id, expression, answer, image, status) '
-        'VALUES (?, ?, ?, ?, ?, "pending")',
-        [
-          user['id'],
-          questionId,
-          row[0],
-          row[1],
-          image,
-        ]);
+        'VALUES (:userId, :qid, :expression, :answer, :image, "pending")',
+        {
+          'userId': user['id'],
+          'qid': questionId,
+          'expression': row['expression'],
+          'answer': row['answer'],
+          'image': image,
+        });
   });
 
   return {'ok': true, 'message': '已提交，等待家长批改'};
@@ -591,27 +644,32 @@ Future<Map<String, dynamic>> pendingHandwriting(RouteContext ctx) async {
     return {'submissions': <Map<String, dynamic>>[], 'total': 0};
   }
 
-  final placeholders = childIds.map((_) => '?').join(',');
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final params = <String, dynamic>{};
+    final placeholders =
+        childIds.map((id, i) {
+          params['cid$i'] = id;
+          return ':cid$i';
+        }).join(',');
+    final res = await conn.execute(
         'SELECT s.id, s.user_id, s.expression, s.answer, s.image, s.created_at, u.nickname '
         'FROM handwriting_submissions s JOIN users u ON u.id = s.user_id '
         'WHERE s.user_id IN ($placeholders) AND s.status = "pending" '
         'ORDER BY s.created_at DESC LIMIT 50',
-        childIds);
+        params);
     return res.rows;
   });
 
   final list = rows.map((row) {
-    final created = row[5] as DateTime?;
+    final r = row.typedAssoc();
     return {
-      'id': row[0],
-      'childId': row[1],
-      'childName': row[6],
-      'expression': row[2],
-      'answer': row[3],
-      'image': row[4],
-      'createdAt': created?.toIso8601String() ?? '',
+      'id': r['id'],
+      'childId': r['user_id'],
+      'childName': r['nickname'],
+      'expression': r['expression'],
+      'answer': r['answer'],
+      'image': r['image'],
+      'createdAt': _isoDateTime(r['created_at']),
     };
   }).toList();
   return {'submissions': list, 'total': list.length};
@@ -636,21 +694,21 @@ Future<Map<String, dynamic>> reviewHandwriting(RouteContext ctx) async {
   }
 
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT s.id, s.user_id, s.status FROM handwriting_submissions s '
         'JOIN users u ON u.id = s.user_id '
-        'WHERE s.id = ? AND u.parent_id = ?',
-        [submissionId, parent['id']]);
+        'WHERE s.id = :submissionId AND u.parent_id = :parentId',
+        {'submissionId': submissionId, 'parentId': parent['id']});
     return res.rows;
   });
   if (rows.isEmpty) {
     throw const ApiError(404, '提交记录不存在');
   }
-  final row = rows.first;
-  if (row[2] != 'pending') {
+  final row = rows.first.typedAssoc();
+  if (row['status'] != 'pending') {
     throw const ApiError(400, '该提交已批改过，不能重复批改');
   }
-  final childId = row[1] as int;
+  final childId = row['user_id'] as int;
 
   final change = correct ? points : -points;
   final reason = correct
@@ -658,17 +716,26 @@ Future<Map<String, dynamic>> reviewHandwriting(RouteContext ctx) async {
       : '手写答案批改为错误，-$points 分';
 
   await Db.withConn((conn) async {
-    await conn.query('UPDATE users SET points = points + ? WHERE id = ?',
-        [change, childId]);
-    await conn.query(
+    await conn.execute(
+        'UPDATE users SET points = points + :change WHERE id = :childId',
+        {'change': change, 'childId': childId});
+    await conn.execute(
         'INSERT INTO points_records (user_id, grade, level, change, reason) '
-        'VALUES (?, 0, 0, ?, ?)',
-        [childId, change, reason]);
-    await conn.query(
+        'VALUES (:userId, 0, 0, :change, :reason)',
+        {
+          'userId': childId,
+          'change': change,
+          'reason': reason,
+        });
+    await conn.execute(
         'UPDATE handwriting_submissions '
-        'SET status = "reviewed", reviewed_by = ?, review_change = ?, reviewed_at = NOW() '
-        'WHERE id = ?',
-        [parent['id'], change, submissionId]);
+        'SET status = "reviewed", reviewed_by = :reviewer, review_change = :change, reviewed_at = NOW() '
+        'WHERE id = :id',
+        {
+          'reviewer': parent['id'],
+          'change': change,
+          'id': submissionId,
+        });
   });
 
   return {'ok': true, 'changed': change, 'reason': reason};
@@ -695,7 +762,8 @@ Future<Map<String, dynamic>> addChild(RouteContext ctx) async {
   _checkGrade(grade);
 
   final exists = await Db.withConn((conn) async {
-    final res = await conn.query('SELECT id FROM users WHERE username = ?', [username]);
+    final res = await conn.execute(
+        'SELECT id FROM users WHERE username = :username', {'username': username});
     return res.rows.isNotEmpty;
   });
   if (exists) {
@@ -705,11 +773,18 @@ Future<Map<String, dynamic>> addChild(RouteContext ctx) async {
   final salt = newSalt();
   final hash = hashPassword(salt, password);
   final id = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'INSERT INTO users (username, password_hash, salt, nickname, role, grade, parent_id) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [username, hash, salt, nickname, 'child', grade, parent['id']]);
-    return res.insertId;
+        'VALUES (:username, :hash, :salt, :nickname, "child", :grade, :parentId)',
+        {
+          'username': username,
+          'hash': hash,
+          'salt': salt,
+          'nickname': nickname,
+          'grade': grade,
+          'parentId': parent['id'],
+        });
+    return res.lastInsertID;
   });
 
   return {'ok': true, 'child': await _loadUser(id)};
@@ -727,17 +802,15 @@ Future<Map<String, dynamic>> listChildren(RouteContext ctx) async {
   for (final child in children) {
     final cid = child['id'] as int;
     final rows = await Db.withConn((conn) async {
-      final res = await conn.query(
-          'SELECT COUNT(*) AS total, SUM(correct = 1) AS correct, '
-          'SUM(mode = "timed" AND correct = 1) AS timed_correct, '
-          'COUNT(DISTINCT mode) AS modes '
-          'FROM records WHERE user_id = ?',
-          [cid]);
+      final res = await conn.execute(
+          'SELECT COUNT(*) AS total, SUM(correct = 1) AS correct '
+          'FROM records WHERE user_id = :cid',
+          {'cid': cid});
       return res.rows;
     });
-    final row = rows.first;
-    final total = (row[0] as num).toInt();
-    final correct = (row[1] as num).toInt();
+    final row = rows.first.typedAssoc();
+    final total = (row['total'] as num).toInt();
+    final correct = (row['correct'] as num).toInt();
     result.add({
       ...child,
       'totalAnswered': total,
@@ -755,10 +828,10 @@ Future<Map<String, dynamic>> childHistory(RouteContext ctx) async {
   final childId = int.tryParse(ctx.params['id'] ?? '') ?? -1;
 
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT id, username, nickname, grade FROM users '
-        "WHERE id = ? AND parent_id = ? AND role = 'child'",
-        [childId, parent['id']]);
+        "WHERE id = :childId AND parent_id = :parentId AND role = 'child'",
+        {'childId': childId, 'parentId': parent['id']});
     return res.rows;
   });
   if (rows.isEmpty) {
@@ -767,20 +840,21 @@ Future<Map<String, dynamic>> childHistory(RouteContext ctx) async {
 
   final limit = int.tryParse(ctx.query['limit'] ?? '50')?.clamp(1, 200) ?? 50;
   final records = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT expression, answer, user_answer, correct, mode, grade, created_at '
-        'FROM records WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
-        [childId, limit]);
+        'FROM records WHERE user_id = :childId ORDER BY created_at DESC LIMIT :limit',
+        {'childId': childId, 'limit': limit});
     return res.rows;
   });
 
+  final childRow = rows.first.typedAssoc();
   return {
     'child': {
-      'id': rows.first[0],
-      'username': rows.first[1],
-      'nickname': rows.first[2],
-      'grade': rows.first[3],
+      'id': childRow['id'],
+      'username': childRow['username'],
+      'nickname': childRow['nickname'],
+      'grade': childRow['grade'],
     },
-    'records': records.map(_recordMap).toList(),
+    'records': records.map((r) => _recordMap(r.typedAssoc())).toList(),
   };
 }

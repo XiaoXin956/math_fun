@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
-import 'package:mysql2/mysql2.dart';
+import 'package:mysql_client/mysql_client.dart';
 
 import 'db.dart';
 import 'http_router.dart';
@@ -36,51 +36,50 @@ String newQuestionId() {
   return buf.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }
 
-/// users 表查询结果（按固定列序）转成前端使用的用户对象。
-/// 列序: id, username, nickname, role, grade, parent_id, points
-Map<String, dynamic> userMap(MySqlRow row) {
+/// users 表查询结果（typedAssoc 转 Map 后）转成前端使用的用户对象。
+/// 键: id, username, nickname, role, grade, parent_id, points
+Map<String, dynamic> userMap(Map<String, dynamic> row) {
   return {
-    'id': row[0],
-    'username': row[1],
-    'nickname': row[2],
-    'role': row[3],
-    'grade': row[4],
-    'parentId': row[5],
-    'points': row[6],
+    'id': row['id'],
+    'username': row['username'],
+    'nickname': row['nickname'],
+    'role': row['role'],
+    'grade': row['grade'],
+    'parentId': row['parent_id'],
+    'points': row['points'],
   };
 }
 
 /// 校验请求头中的 Bearer token，返回当前登录用户信息。
 /// 未登录或 token 过期时抛出 401 ApiError。
-Future<Map<String, dynamic>> requireUser(Map<String, String> headers) async {
-  final auth = headers['authorization'] ?? '';
+Future<Map<String, dynamic>> requireUser(Map<String, List<String>> headers) async {
+  final auth = headers['authorization']?.first ?? '';
   final token = auth.startsWith('Bearer ') ? auth.substring(7).trim() : '';
   if (token.isEmpty) {
     throw const ApiError(401, '请先登录');
   }
   final rows = await Db.withConn((conn) async {
-    final res = await conn.query(
+    final res = await conn.execute(
         'SELECT u.id, u.username, u.nickname, u.role, u.grade, u.parent_id, u.points '
         'FROM sessions s JOIN users u ON u.id = s.user_id '
-        'WHERE s.token = ? AND s.expires_at > NOW()',
-        [token]);
+        'WHERE s.token = :token AND s.expires_at > NOW()',
+        {'token': token});
     return res.rows;
   });
   if (rows.isEmpty) {
     throw const ApiError(401, '登录已过期，请重新登录');
   }
-  return userMap(rows.first);
+  return userMap(rows.first.typedAssoc());
 }
 
 /// 创建登录会话，返回新 token。
 Future<String> createSession(int userId) async {
   final token = newToken();
-  final expires =
-      DateTime.now().add(Duration(days: Db.config.tokenTtlDays));
   await Db.withConn((conn) async {
-    await conn.query(
-        'INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)',
-        [token, userId, expires]);
+    await conn.execute(
+        'INSERT INTO sessions (token, user_id, expires_at) '
+        'VALUES (:token, :uid, DATE_ADD(NOW(), INTERVAL :days DAY))',
+        {'token': token, 'uid': userId, 'days': Db.config.tokenTtlDays});
   });
   return token;
 }
