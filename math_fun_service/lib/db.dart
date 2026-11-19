@@ -26,8 +26,10 @@ class Db {
           password: config.dbPassword,
           databaseName: config.dbName,
           maxConnections: 8,
-          // 内网/Docker 中的 MySQL 未配置 TLS，必须关闭加密连接
-          secure: false,
+          // 是否启用 TLS：由 DB_SECURE 配置决定。
+          // 远程 MySQL（caching_sha2_password 认证）必须启用，
+          // 本地 Docker 内网库无需启用。
+          secure: config.dbSecure,
           collation: 'utf8mb4_unicode_ci',
         );
         await _pool!.execute('SELECT 1');
@@ -126,7 +128,7 @@ class Db {
         'user_id INT NOT NULL,'
         'grade TINYINT NOT NULL DEFAULT 0,'
         'level TINYINT NOT NULL DEFAULT 0,'
-        'change INT NOT NULL,'
+        '`change` INT NOT NULL,'
         'reason VARCHAR(128) NOT NULL,'
         'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
         'INDEX idx_user_time (user_id, created_at),'

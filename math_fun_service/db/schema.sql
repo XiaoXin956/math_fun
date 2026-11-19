@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS points_records (
   user_id INT NOT NULL,
   grade TINYINT NOT NULL DEFAULT 0,
   level TINYINT NOT NULL DEFAULT 0,
-  change INT NOT NULL,
+  `change` INT NOT NULL,
   reason VARCHAR(128) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_user_time (user_id, created_at),

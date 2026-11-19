@@ -93,13 +93,31 @@ docker compose up -d --build
 
 需要本机安装 Dart SDK（3.3+）与 MySQL 8。
 
+在 `math_fun_service/.env` 中配置数据库连接（该文件已被 .gitignore 忽略，不会提交到仓库）：
+
+```env
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=123456
+DB_NAME=math_fun
+DB_SECURE=false
+PORT=8080
+```
+
+> 配置优先级：**系统环境变量 > .env 文件 > 代码默认值**。
+> 若你的 MySQL 使用 `caching_sha2_password` 认证（MySQL 8 默认）或连接远程库，需设置 `DB_SECURE=true` 启用 TLS，否则会报
+> `Auth plugin caching_sha2_password is supported only with secure connections`。
+
+首次运行会自动建表，无需手动导入 `db/schema.sql`。
+
 ```bash
 cd math_fun_service
 dart pub get
-mysql -uroot -p < db/schema.sql
-dart run lib/main.dart \
-  -DB_HOST=127.0.0.1 -DB_USER=root -DB_PASSWORD=123456 -DB_NAME=math_fun
+dart run lib/main.dart
 ```
+
+服务启动后会打印 `[db] MySQL 连接成功: host:port/db` 与监听地址。
 
 ## 运行前端（Flutter）
 

@@ -433,7 +433,7 @@ Future<Map<String, dynamic>> completeChallenge(RouteContext ctx) async {
     final res = await conn.execute(
         'SELECT id FROM points_records '
         'WHERE user_id = :userId AND grade = :grade AND level = :level '
-        'AND change > 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) '
+        'AND `change` > 0 AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) '
         'LIMIT 1',
         {'userId': userId, 'grade': grade, 'level': level});
     return res.rows.isNotEmpty;
@@ -486,7 +486,7 @@ Future<Map<String, dynamic>> _awardPoints(
         'UPDATE users SET points = points + :change WHERE id = :userId',
         {'change': change, 'userId': userId});
     await conn.execute(
-        'INSERT INTO points_records (user_id, grade, level, change, reason) '
+        'INSERT INTO points_records (user_id, grade, level, `change`, reason) '
         'VALUES (:userId, :grade, :level, :change, :reason)',
         {
           'userId': userId,
@@ -512,7 +512,7 @@ Future<Map<String, dynamic>> pointsHistory(RouteContext ctx) async {
 
   final rows = await Db.withConn((conn) async {
     final res = await conn.execute(
-        'SELECT change, reason, grade, level, created_at FROM points_records '
+        'SELECT `change`, reason, grade, level, created_at FROM points_records '
         'WHERE user_id = :userId ORDER BY created_at DESC LIMIT :limit',
         {'userId': user['id'], 'limit': limit});
     return res.rows;
@@ -715,7 +715,7 @@ Future<Map<String, dynamic>> reviewHandwriting(RouteContext ctx) async {
         'UPDATE users SET points = points + :change WHERE id = :childId',
         {'change': change, 'childId': childId});
     await conn.execute(
-        'INSERT INTO points_records (user_id, grade, level, change, reason) '
+        'INSERT INTO points_records (user_id, grade, level, `change`, reason) '
         'VALUES (:userId, 0, 0, :change, :reason)',
         {
           'userId': childId,
