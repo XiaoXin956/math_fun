@@ -1,6 +1,8 @@
 # 构建上下文排除项（多阶段构建只需要源码）
 .dart_tool/
-build/
+# build/ 默认排除，但放行 web 产物供 Dockerfile.web.local 离线打包使用
+build/*
+!build/web
 .packages
 .idea/
 *.iml

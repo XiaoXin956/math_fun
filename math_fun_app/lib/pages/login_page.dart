@@ -4,7 +4,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../bloc/auth_cubit.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_components.dart';
-import '../widgets/common.dart';
 
 class LoginPage extends StatefulWidget {
   static const routeName = '/login';
@@ -18,9 +17,6 @@ class _LoginPageState extends State<LoginPage> {
   final _username = TextEditingController();
   final _password = TextEditingController();
   final _nickname = TextEditingController();
-
-  String _role = 'child'; // child / parent
-  int _grade = 2;
 
   @override
   void dispose() {
@@ -53,12 +49,12 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
     if (isRegister) {
+      // 只开放家长注册；孩子账号由家长在首页添加
       await cubit.register({
         'username': username,
         'password': password,
         'nickname': _nickname.text.trim(),
-        'role': _role,
-        'grade': _role == 'child' ? _grade : null,
+        'role': 'parent',
       });
     } else {
       await cubit.login(username, password);
@@ -291,32 +287,6 @@ class _LoginPageState extends State<LoginPage> {
               prefixIcon: Icon(Icons.emoji_emotions_outlined),
             ),
           ),
-          const SizedBox(height: 18),
-          const Text('账号类型',
-              style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.inkSoft)),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(child: _roleChip('🧒 孩子', 'child')),
-              const SizedBox(width: 12),
-              Expanded(child: _roleChip('👨‍👩‍👧 家长', 'parent')),
-            ],
-          ),
-          if (_role == 'child') ...[
-            const SizedBox(height: 18),
-            const Text('选择年级',
-                style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.inkSoft)),
-            const SizedBox(height: 10),
-            GradeChips(
-                selected: _grade,
-                onChanged: (g) => setState(() => _grade = g)),
-          ],
           const SizedBox(height: 22),
           BlocBuilder<AuthCubit, AuthState>(
             builder: (context, state) {
@@ -331,39 +301,11 @@ class _LoginPageState extends State<LoginPage> {
           ),
           const SizedBox(height: 14),
           const Text(
-            '家长注册后可在首页添加孩子账号并查看成绩',
+            '注册后可在首页添加孩子账号并查看成绩',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: AppColors.inkFaint),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _roleChip(String label, String value) {
-    final selected = _role == value;
-    return GestureDetector(
-      onTap: () => setState(() => _role = value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 13),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          gradient: selected ? AppGradients.brand : null,
-          color: selected ? null : AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: selected
-              ? null
-              : Border.all(color: AppColors.line, width: 1.5),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-            color: selected ? Colors.white : AppColors.inkSoft,
-          ),
-        ),
       ),
     );
   }

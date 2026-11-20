@@ -52,23 +52,17 @@ String _isoDateTime(dynamic v) {
 
 // ---------- 认证 ----------
 
+/// 注册只开放家长账号；孩子账号由家长通过 /api/children 创建。
+/// 忽略客户端传入的 role/grade，避免绕过限制注册孩子账号。
 Future<Map<String, dynamic>> register(RouteContext ctx) async {
   final username = _str(ctx.body, 'username');
   final password = _str(ctx.body, 'password');
   final nickname = _str(ctx.body, 'nickname');
-  final role = _str(ctx.body, 'role');
-  final grade = _int(ctx.body['grade']);
 
   _checkUsername(username);
   _checkPassword(password);
   if (nickname.isEmpty || nickname.length > 32) {
     throw const ApiError(400, '昵称不能为空且不超过 32 字');
-  }
-  if (role != 'parent' && role != 'child') {
-    throw const ApiError(400, '角色需为 parent 或 child');
-  }
-  if (role == 'child') {
-    _checkGrade(grade);
   }
 
   final salt = newSalt();
@@ -77,14 +71,12 @@ Future<Map<String, dynamic>> register(RouteContext ctx) async {
   final result = await Db.withConn((conn) async {
     final res = await conn.execute(
         'INSERT INTO users (username, password_hash, salt, nickname, role, grade) '
-        'VALUES (:username, :hash, :salt, :nickname, :role, :grade)',
+        'VALUES (:username, :hash, :salt, :nickname, "parent", NULL)',
         {
           'username': username,
           'hash': hash,
           'salt': salt,
           'nickname': nickname,
-          'role': role,
-          'grade': role == 'child' ? grade : null,
         });
     return res.lastInsertID.toInt();
   });
@@ -970,14 +962,12 @@ Future<Map<String, dynamic>> addChild(RouteContext ctx) async {
   final username = _str(ctx.body, 'username');
   final password = _str(ctx.body, 'password');
   final nickname = _str(ctx.body, 'nickname');
-  final grade = _int(ctx.body['grade']);
 
   _checkUsername(username);
   _checkPassword(password);
   if (nickname.isEmpty || nickname.length > 32) {
     throw const ApiError(400, '昵称不能为空且不超过 32 字');
   }
-  _checkGrade(grade);
 
   final exists = await Db.withConn((conn) async {
     final res = await conn.execute(
@@ -993,13 +983,12 @@ Future<Map<String, dynamic>> addChild(RouteContext ctx) async {
   final id = await Db.withConn((conn) async {
     final res = await conn.execute(
         'INSERT INTO users (username, password_hash, salt, nickname, role, grade, parent_id) '
-        'VALUES (:username, :hash, :salt, :nickname, "child", :grade, :parentId)',
+        'VALUES (:username, :hash, :salt, :nickname, "child", NULL, :parentId)',
         {
           'username': username,
           'hash': hash,
           'salt': salt,
           'nickname': nickname,
-          'grade': grade,
           'parentId': parent['id'],
         });
     return res.lastInsertID.toInt();

@@ -1,3 +1,10 @@
+# 本地打包环境配置（含部署地址，不推送；模板 .env.apk.example 可推送）
+.env
+.env.apk
+
+# 放行离线部署用的 web Dockerfile（根 .gitignore 的 *.local 会忽略它）
+!Dockerfile.web.local
+
 # Miscellaneous
 *.class
 *.log

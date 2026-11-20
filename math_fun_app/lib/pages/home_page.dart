@@ -181,7 +181,7 @@ class _HomePageState extends State<HomePage> {
                     Text(
                       user.isParent
                           ? '家长账号 · 管理孩子与查看成绩'
-                          : '${user.grade ?? 2} 年级 · 一起来算术吧',
+                          : '一起来算术吧',
                       style: const TextStyle(
                           fontSize: 14, color: AppColors.inkSoft),
                     ),
@@ -248,7 +248,7 @@ class _HomePageState extends State<HomePage> {
         title: Text(child.nickname,
             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
         subtitle: Text(
-          '${child.grade} 年级 · 已答题 ${child.totalAnswered} 题 · '
+          '已答题 ${child.totalAnswered} 题 · '
           '正确率 ${(child.accuracy * 100).toStringAsFixed(0)}%',
           style: const TextStyle(fontSize: 13),
         ),
@@ -500,7 +500,6 @@ class _HomePageState extends State<HomePage> {
   final username = TextEditingController();
   final password = TextEditingController();
   final nickname = TextEditingController();
-  int grade = 2;
   String? error;
 
     final result = await showDialog<String>(
@@ -531,13 +530,6 @@ class _HomePageState extends State<HomePage> {
                 TextField(controller: nickname,
                     decoration: const InputDecoration(
                         labelText: '昵称', border: OutlineInputBorder())),
-                const SizedBox(height: 12),
-                const Text('年级', style: TextStyle(fontSize: 14)),
-                const SizedBox(height: 8),
-                GradeChipsPicker(
-                  selected: grade,
-                  onChanged: (g) => setDialogState(() => grade = g),
-                ),
               ],
             ),
             actions: [
@@ -551,7 +543,6 @@ class _HomePageState extends State<HomePage> {
                       'username': username.text.trim(),
                       'password': password.text,
                       'nickname': nickname.text.trim(),
-                      'grade': grade,
                     });
                     if (!mounted) return;
                     Navigator.of(ctx).pop('ok');
@@ -575,38 +566,5 @@ class _HomePageState extends State<HomePage> {
       );
       _loadChildren();
     }
-  }
-}
-
-// 对话框内部需要可更新的年级选择，独立成组件避免 StatefulBuilder 闭包问题
-class GradeChipsPicker extends StatelessWidget {
-  final int selected;
-  final ValueChanged<int> onChanged;
-  const GradeChipsPicker({super.key, required this.selected, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: List.generate(6, (i) {
-        final grade = i + 1;
-        final isSelected = grade == selected;
-        return GestureDetector(
-          onTap: () => onChanged(grade),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: isSelected ? AppColors.brand : AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text('$grade 年级',
-                style: TextStyle(
-                    fontSize: 14,
-                    color: isSelected ? Colors.white : AppColors.inkSoft)),
-          ),
-        );
-      }),
-    );
   }
 }

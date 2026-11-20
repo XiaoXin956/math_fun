@@ -29,13 +29,41 @@ android {
         versionName = flutter.versionName
     }
 
-    buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+    // 1. 定义签名配置
+    signingConfigs {
+        create("release") {
+            storeFile = file("key/xiaoxin.jks") // 建议放在项目根目录或 app 目录下
+            storePassword = "xiaoxin"
+            keyAlias = "xiaoxin"
+            keyPassword = "xiaoxin"
         }
     }
+
+    buildTypes {
+
+        getByName("release") {
+            // R8 代码压缩 + 资源收缩，配合 Dart 混淆与 ABI 分包显著减小 APK
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+
+            // 2. 将签名配置应用到 release 版本
+            signingConfig = signingConfigs.getByName("release")
+        }
+
+        getByName("debug") {
+//            isMinifyEnabled = true
+//            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+
+            // 2. 将签名配置应用到 release 版本
+            signingConfig = signingConfigs.getByName("release")
+        }
+
+    }
+
 }
 
 kotlin {

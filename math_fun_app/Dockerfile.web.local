@@ -1,0 +1,9 @@
+# 离线兜底：宿主机已用 `flutter build web` 生成 build/web 后，用本地 nginx 镜像直接打包。
+# 用于 ghcr.io 不可达时替代 Dockerfile.web（两者产物完全一致）。
+# 用法（在 math_fun_app 目录）：
+#   flutter build web --release --dart-define-from-file=.env
+#   docker build --pull=false -f Dockerfile.web.local -t math_fun_web:latest .
+FROM nginx:stable
+COPY build/web /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+EXPOSE 8083
