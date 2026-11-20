@@ -4,6 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../theme/app_theme.dart';
+
 /// 手写答案画板：孩子在上面手写答案，可清空，可导出 base64 PNG 提交给家长批改。
 class HandwritingPad extends StatefulWidget {
   final Size size;
@@ -24,7 +26,9 @@ class HandwritingPadState extends State<HandwritingPad> {
 
   void _down(PointerDownEvent e) {
     setState(() {
-      current = [e.position];
+      // 必须用 localPosition（相对画板左上角），不能用 position（全局窗口坐标），
+      // 否则画板不在窗口左上角时笔画会整体偏移，与手势位置对不上。
+      current = [e.localPosition];
       _revision++;
     });
   }
@@ -32,7 +36,7 @@ class HandwritingPadState extends State<HandwritingPad> {
   void _move(PointerMoveEvent e) {
     if (current == null) return;
     setState(() {
-      current!.add(e.position);
+      current!.add(e.localPosition);
       _revision++;
     });
   }
@@ -85,7 +89,7 @@ class HandwritingPadState extends State<HandwritingPad> {
       height: widget.size.height,
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: const Color(0xFFD9C7BC)),
+        border: Border.all(color: AppColors.line),
         borderRadius: BorderRadius.circular(16),
       ),
       child: RepaintBoundary(

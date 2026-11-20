@@ -8,6 +8,8 @@ import '../api/config.dart';
 import '../bloc/auth_cubit.dart';
 import '../pages/login_page.dart';
 import '../services/session.dart';
+import '../theme/app_theme.dart';
+import 'app_components.dart';
 import '../widgets/common.dart';
 
 /// 答题运行组件：出题 → 输入答案 → 判分反馈 → 下一题。
@@ -55,13 +57,21 @@ class _QuestionRunnerState extends State<QuestionRunner> {
   int _secondsLeft = 0;
   final _startTime = DateTime.now();
 
-  // 自由练习 / 闯关：一次性下发全部题目+答案，本地判分，最后批量上报
+  // 限时挑战：累计答题时间（暂停拉取题目期间不计时）
+  DateTime _timingSegmentStart = DateTime.now();
+  int _accumulatedSeconds = 0;
+  bool _timing = false;
+  static const int _batchSize = 10;
+
+  // 自由练习 / 闯关 / 限时：批量下发题目+答案，本地判分
   List<Map<String, dynamic>> _batch = [];
   int _batchIndex = 0;
   final List<Map<String, dynamic>> _batchResults = [];
   Map<String, dynamic>? _practicePoints;
   bool get _isBatch =>
-      widget.mode == 'practice' || widget.mode == 'challenge';
+      widget.mode == 'practice' ||
+      widget.mode == 'challenge' ||
+      widget.mode == 'timed';
 
   ApiClient get _client => Session.createClient();
 
@@ -70,7 +80,7 @@ class _QuestionRunnerState extends State<QuestionRunner> {
     super.initState();
     if (widget.mode == 'timed') {
       _secondsLeft = _initialSeconds();
-      _startTimer();
+      // 计时在第一批题目加载成功、显示出来之后才开始（见 _loadBatch）
     }
     if (_isBatch) {
       _loadBatch();
@@ -81,18 +91,52 @@ class _QuestionRunnerState extends State<QuestionRunner> {
 
   int _initialSeconds() => timedDurationSeconds;
 
+  /// 已累计的答题秒数（含当前正在计时的一段）。
+  int get _elapsedSeconds {
+    final current = _timing
+        ? DateTime.now().difference(_timingSegmentStart).inSeconds
+        : 0;
+    return _accumulatedSeconds + current;
+  }
+
   void _startTimer() {
     _timer?.cancel();
+    _timing = true;
+    _timingSegmentStart = DateTime.now();
+    _secondsLeft = _initialSeconds() - _elapsedSeconds;
+    if (_secondsLeft < 0) _secondsLeft = 0;
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      setState(() {
-        _secondsLeft--;
-      });
-      if (_secondsLeft <= 0) {
+      final elapsed = _elapsedSeconds;
+      final left = _initialSeconds() - elapsed;
+      if (left <= 0) {
         _timer?.cancel();
         _timer = null;
+        _timing = false;
+        if (mounted) setState(() => _secondsLeft = 0);
         _finish();
+        return;
       }
+      if (mounted) setState(() => _secondsLeft = left);
     });
+  }
+
+  /// 暂停计时：把当前段累计进总量（拉取下一批题目时调用）。
+  void _pauseTimer() {
+    if (!_timing) return;
+    _accumulatedSeconds = _elapsedSeconds;
+    _timing = false;
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  /// 恢复计时：开启新的一段（题目拉取成功显示后调用）。
+  void _resumeTimer() {
+    if (_finished || _timing) return;
+    if (_initialSeconds() - _elapsedSeconds <= 0) {
+      _finish();
+      return;
+    }
+    _startTimer();
   }
 
   @override
@@ -134,10 +178,13 @@ class _QuestionRunnerState extends State<QuestionRunner> {
       _feedback = '';
     });
     try {
+      final count = widget.mode == 'timed'
+          ? _batchSize
+          : (widget.totalQuestions ?? 10);
       final res = await _client.post('/api/practice/questions', {
         'grade': widget.grade,
         'operation': widget.operation,
-        'count': widget.totalQuestions ?? 10,
+        'count': count,
       });
       final questions = res['questions'] as List;
       if (!mounted) return;
@@ -148,7 +195,11 @@ class _QuestionRunnerState extends State<QuestionRunner> {
         _feedback = '';
       });
       _focus.requestFocus();
+      // 限时：题目显示出来后才开始/恢复计时
+      if (widget.mode == 'timed') _resumeTimer();
     } catch (e) {
+      // 拉取失败也要恢复计时，避免限时卡在暂停状态
+      if (widget.mode == 'timed') _resumeTimer();
       _handleError(e);
     }
   }
@@ -210,7 +261,7 @@ class _QuestionRunnerState extends State<QuestionRunner> {
 
   /// 自由练习：用已下发的答案本地即时判分，无网络等待；全部答完再批量上报。
   void _submitLocal(int answer) {
-    if (_question == null) return;
+    if (_question == null || _finished) return;
     final correctAnswer = _question!['answer'] as int;
     final correct = answer == correctAnswer;
 
@@ -230,7 +281,13 @@ class _QuestionRunnerState extends State<QuestionRunner> {
     });
 
     if (_answered >= _batch.length) {
-      _finishBatch();
+      if (widget.mode == 'timed') {
+        // 限时：答完一批，暂停计时后拉取下一批（下拉成功显示后恢复计时）
+        _pauseTimer();
+        _loadBatch();
+      } else {
+        _finishBatch();
+      }
       return;
     }
     _batchIndex++;
@@ -274,12 +331,32 @@ class _QuestionRunnerState extends State<QuestionRunner> {
     _finished = true;
     _timer?.cancel();
     _timer = null;
+    // 把正在计时的一段累计进去，保证 seconds 精确
+    if (_timing) {
+      _accumulatedSeconds = _elapsedSeconds;
+      _timing = false;
+    }
+
+    // 限时：结束时把最后一批的逐题结果批量写入历史记录（不阻塞结算）
+    if (widget.mode == 'timed' && _batchResults.isNotEmpty) {
+      _client
+          .post('/api/practice/results', {
+            'grade': widget.grade,
+            'mode': 'timed',
+            'results': _batchResults,
+          })
+          .catchError((_) => <String, dynamic>{});
+    }
+
     final summary = <String, dynamic>{
       'mode': widget.mode,
       'grade': widget.grade,
       'correct': _correctCount,
       'total': _answered,
-      'seconds': DateTime.now().difference(_startTime).inSeconds,
+      // 限时用累计答题时间（不含拉取题目暂停的时间）
+      'seconds': widget.mode == 'timed'
+          ? _elapsedSeconds
+          : DateTime.now().difference(_startTime).inSeconds,
       if (_practicePoints != null) 'points': _practicePoints,
     };
     if (widget.onComplete != null) {
@@ -348,115 +425,184 @@ class _QuestionRunnerState extends State<QuestionRunner> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              // 限时倒计时胶囊 / 题号进度
               if (widget.mode == 'timed')
-                Text(
-                  '剩余 ${_secondsLeft} 秒',
-                  style: const TextStyle(
-                    fontSize: 40,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFFE8842C),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                  decoration: BoxDecoration(
+                    gradient: _secondsLeft <= 10
+                        ? const LinearGradient(colors: [
+                            AppColors.danger,
+                            AppColors.brand])
+                        : AppGradients.success,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                    boxShadow: AppShadows.soft,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer_rounded,
+                          color: Colors.white, size: 24),
+                      const SizedBox(width: 8),
+                      Text(
+                        '剩余 $_secondsLeft 秒',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                 )
               else if (total != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: AppColors.purpleSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
                   child: Text(
                     '第 ${_answered + 1} / $total 题',
-                    style: const TextStyle(fontSize: 18, color: Color(0xFF8A5A4A)),
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.purple),
                   ),
                 ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 18),
               if (total != null && widget.mode != 'timed')
-                SizedBox(
-                  width: double.infinity,
-                  height: 8,
-                  child: LinearProgressIndicator(
-                    value: _answered / total,
-                    backgroundColor: const Color(0xFFFFE3DA),
-                    valueColor: const AlwaysStoppedAnimation(Color(0xFFFF7A59)),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 10,
+                    child: LinearProgressIndicator(
+                      value: _answered / total,
+                      backgroundColor: AppColors.surfaceAlt,
+                      valueColor:
+                          const AlwaysStoppedAnimation(AppColors.brand),
+                    ),
                   ),
                 ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 26),
+              // 题目卡：柔和渐变 + 大号数字
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 40, horizontal: 16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF0E8),
-                  borderRadius: BorderRadius.circular(24),
+                  gradient: const LinearGradient(
+                    colors: [Colors.white, Color(0xFFF8FAFC)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                  borderRadius: BorderRadius.circular(AppRadius.xxl),
+                  boxShadow: AppShadows.soft,
                 ),
                 child: _question == null
                     ? const Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           SizedBox(
-                            height: 40,
-                            width: 40,
-                            child: CircularProgressIndicator(strokeWidth: 3),
+                            height: 44,
+                            width: 44,
+                            child: CircularProgressIndicator(strokeWidth: 3.5),
                           ),
-                          SizedBox(height: 12),
+                          SizedBox(height: 14),
                           Text('正在出题…',
                               style: TextStyle(
-                                  fontSize: 18, color: Color(0xFF8A5A4A))),
+                                  fontSize: 17, color: AppColors.inkSoft)),
                         ],
                       )
                     : Text(
                         _question!['expression'] as String,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          fontSize: 48,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF5A3E36),
+                          fontSize: 52,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.ink,
+                          letterSpacing: -1,
                         ),
                       ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 26),
+              // 答案输入框
               TextField(
                 controller: _controller,
                 focusNode: _focus,
                 keyboardType: const TextInputType.numberWithOptions(
                     signed: false, decimal: false),
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 34, fontWeight: FontWeight.bold),
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: const BorderSide(color: Color(0xFFFFC9BC)),
-                  ),
-                  hintText: '输入答案',
-                  hintStyle: const TextStyle(fontSize: 26),
+                style: const TextStyle(
+                    fontSize: 36,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.ink),
+                decoration: const InputDecoration(
+                  hintText: '在这里写下答案',
+                  hintStyle: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.inkFaint),
                 ),
                 onSubmitted: (_) => _submit(),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
+              // 情绪化反馈横幅
               if (_feedback.isNotEmpty)
-                Text(
-                  _feedback,
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
                     color: _feedbackCorrect
-                        ? const Color(0xFF2E9E5B)
-                        : const Color(0xFFD9534F),
+                        ? AppColors.successSoft
+                        : AppColors.dangerSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _feedbackCorrect
+                            ? Icons.check_circle_rounded
+                            : Icons.info_rounded,
+                        color: _feedbackCorrect
+                            ? AppColors.success
+                            : AppColors.danger,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _feedback,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: _feedbackCorrect
+                                ? AppColors.success
+                                : AppColors.danger,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _busy ? null : _submit,
-                // 自由练习最后一题提交后进入批量上报，按钮切换为加载框
-                child: _isBatch && _busy
-                    ? const SizedBox(
-                        height: 24,
-                        width: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2.5),
-                      )
-                    : Text(
-                        _question == null ? '等待出题…' : '提交答案',
-                        style: const TextStyle(fontSize: 20),
+              const SizedBox(height: 22),
+              // 提交按钮：批量上报时转圈
+              _isBatch && _busy
+                  ? const SizedBox(
+                      height: 56,
+                      child: Center(
+                        child: CircularProgressIndicator(strokeWidth: 3),
                       ),
-              ),
+                    )
+                  : BrandButton(
+                      _question == null ? '等待出题…' : '提交答案',
+                      icon: Icons.send_rounded,
+                      onPressed: _submit,
+                    ),
               if (widget.mode == 'timed')
                 TextButton(
                   onPressed: _busy ? null : _finish,

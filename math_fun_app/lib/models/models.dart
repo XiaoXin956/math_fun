@@ -88,9 +88,45 @@ class Record {
       return "${d.year}-${d.month.toString().padLeft(2, '0')}-"
           "${d.day.toString().padLeft(2, '0')} "
           "${d.hour.toString().padLeft(2, '0')}:"
-          "${d.minute.toString().padLeft(2, '0')}";
+          "${d.minute.toString().padLeft(2, '0')}:"
+          "${d.second.toString().padLeft(2, '0')}";
     } catch (_) {
       return createdAt;
+    }
+  }
+
+  /// 日期部分 yyyy-MM-dd，用于历史记录分组。
+  String get dateLabel {
+    if (createdAt.isEmpty) return '';
+    try {
+      final d = DateTime.parse(createdAt);
+      return "${d.year}-${d.month.toString().padLeft(2, '0')}-"
+          "${d.day.toString().padLeft(2, '0')}";
+    } catch (_) {
+      return createdAt.length >= 10 ? createdAt.substring(0, 10) : createdAt;
+    }
+  }
+
+  /// 分组标题用的完整玩法名。
+  String get modeGroupLabel {
+    switch (mode) {
+      case 'practice':
+        return '自由练习';
+      case 'challenge':
+        return '闯关挑战';
+      case 'timed':
+        return '限时挑战';
+      default:
+        return mode;
+    }
+  }
+
+  /// 排序用的时间戳（毫秒），解析失败返回 0。
+  int get createdMillis {
+    try {
+      return DateTime.parse(createdAt).millisecondsSinceEpoch;
+    } catch (_) {
+      return 0;
     }
   }
 }
@@ -111,10 +147,16 @@ class Child extends User {
         );
 
   factory Child.fromJson(Map<String, dynamic> json) {
+    final rawTotal = json['totalAnswered'];
+    final rawAcc = json['accuracy'];
     return Child(
       User.fromJson(json),
-      totalAnswered: json['totalAnswered'] as int,
-      accuracy: (json['accuracy'] as num).toDouble(),
+      totalAnswered: rawTotal is int
+          ? rawTotal
+          : (rawTotal is num ? rawTotal.toInt() : int.tryParse('$rawTotal') ?? 0),
+      accuracy: rawAcc is num
+          ? rawAcc.toDouble()
+          : double.tryParse('$rawAcc') ?? 0.0,
     );
   }
 }
@@ -234,6 +276,62 @@ class HandwritingSubmission {
       answer: json['answer'] as int,
       image: json['image'] as String,
       createdAt: json['createdAt'] as String,
+    );
+  }
+}
+
+/// 一次手写练习（批次）= 一组，组内多道题，家长按组批改、整组一次给分。
+class HandwritingBatch {
+  final String batchId;
+  final int childId;
+  final String childName;
+  final String createdAt;
+  final List<HandwritingItem> items;
+
+  const HandwritingBatch({
+    required this.batchId,
+    required this.childId,
+    required this.childName,
+    required this.createdAt,
+    required this.items,
+  });
+
+  factory HandwritingBatch.fromJson(Map<String, dynamic> json) {
+    return HandwritingBatch(
+      batchId: json['batchId'] as String,
+      childId: json['childId'] as int,
+      childName: json['childName'] as String,
+      createdAt: json['createdAt'] as String,
+      items: (json['items'] as List)
+          .map((e) => HandwritingItem.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+/// 批次内的一道手写题。
+class HandwritingItem {
+  final int id;
+  final String expression;
+  final int answer;
+  final String image; // base64 PNG
+
+  const HandwritingItem({
+    required this.id,
+    required this.expression,
+    required this.answer,
+    required this.image,
+  });
+
+  factory HandwritingItem.fromJson(Map<String, dynamic> json) {
+    final rawAnswer = json['answer'];
+    return HandwritingItem(
+      id: json['id'] as int,
+      expression: (json['expression'] ?? '').toString(),
+      answer: rawAnswer is int
+          ? rawAnswer
+          : (rawAnswer is num ? rawAnswer.toInt() : int.tryParse('$rawAnswer') ?? 0),
+      image: (json['image'] ?? '').toString(),
     );
   }
 }

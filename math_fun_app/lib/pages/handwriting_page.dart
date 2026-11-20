@@ -1,9 +1,13 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../services/session.dart';
 import '../widgets/common.dart';
 import '../widgets/handwriting_pad.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_components.dart';
 
 /// 手写练习：出带书写区的算术题，孩子手写答案后提交给家长批改，
 /// 批改通过加分、不通过扣分（分值由家长决定）。
@@ -24,15 +28,22 @@ class _HandwritingPageState extends State<HandwritingPage> {
   Map<String, dynamic>? _question;
   String _feedback = '';
   bool _busy = false;
+  // 一次练习 = 一个批次，组内 5 题共享，家长按组批改、一次给分
+  String _batchId = '';
 
   ApiClient get _client => Session.createClient();
 
   Future<void> _start() async {
+    final rand = Random();
     setState(() {
       _playing = true;
       _answered = 0;
       _question = null;
       _feedback = '';
+      // Web(DDC) 下 `1 << 32` 会被 JS 32 位位移截断成 0，导致 nextInt(0) 抛
+      // RangeError；用 2^31-1 作为上界，跨平台都安全且随机性足够。
+      _batchId = 'hw_${DateTime.now().microsecondsSinceEpoch}_'
+          '${rand.nextInt(0x7FFFFFFF).toRadixString(16)}';
     });
     await _loadQuestion();
   }
@@ -73,6 +84,7 @@ class _HandwritingPageState extends State<HandwritingPage> {
     }
     try {
       await _client.post('/api/handwriting/submit', {
+        'batch_id': _batchId,
         'question_id': _question!['id'],
         'image': image,
       });
@@ -132,58 +144,83 @@ class _HandwritingPageState extends State<HandwritingPage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: _playing
-              ? SingleChildScrollView(
-                  child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      '第 ${_answered + 1} / 5 题',
-                      style: const TextStyle(fontSize: 18, color: Color(0xFF8A5A4A)),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF0E8),
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Center(
-                        child: Text(
-                          _question?['expression'] as String? ?? '正在出题…',
-                          style: const TextStyle(
-                              fontSize: 44,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF5A3E36)),
+                    // 可滚动内容：题号 / 题目 / 画板
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              '第 ${_answered + 1} / 5 题',
+                              style: const TextStyle(
+                                  fontSize: 18, color: AppColors.inkSoft),
+                            ),
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 22, horizontal: 16),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceAlt,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  _question?['expression'] as String? ?? '正在出题…',
+                                  style: const TextStyle(
+                                      fontSize: 42,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.ink),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text('请在下方手写答案（字写大一些）',
+                                style: TextStyle(
+                                    fontSize: 15, color: AppColors.inkSoft)),
+                            const SizedBox(height: 12),
+                            HandwritingPad(key: _padKey),
+                          ],
                         ),
                       ),
                     ),
+                    // 底部固定操作栏：提交按钮始终可见
                     const SizedBox(height: 12),
-                    const Text('请在下方手写答案（字写大一些）',
-                        style: TextStyle(fontSize: 15, color: Color(0xFF8A5A4A))),
-                    const SizedBox(height: 12),
-                    HandwritingPad(key: _padKey),
-                    const SizedBox(height: 12),
+                    if (_feedback.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Text(
+                          _feedback,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.success),
+                        ),
+                      ),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        TextButton(
-                            onPressed: _busy ? null : () => _padKey.currentState?.clear(),
-                            child: const Text('清空重写')),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                            onPressed: _busy ? null : _submit,
-                            child: Text(
-                                _busy ? '提交中…' : '提交给家长批改')),
+                        TextButton.icon(
+                          onPressed:
+                              _busy ? null : () => _padKey.currentState?.clear(),
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          label: const Text('清空'),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: BrandButton(
+                            _busy ? '提交中…' : '提交给家长批改',
+                            icon: Icons.send_rounded,
+                            loading: _busy,
+                            onPressed: _submit,
+                          ),
+                        ),
                       ],
                     ),
-                    if (_feedback.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Text(_feedback,
-                          style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
-                    ],
-                  ]),
+                  ],
                 )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -200,7 +237,7 @@ class _HandwritingPageState extends State<HandwritingPage> {
                     const SizedBox(height: 12),
                     const Text(
                       '提交后由家长批改：批改正确加分，错误扣分，分值由家长决定（最多 10 分）',
-                      style: TextStyle(fontSize: 13, color: Color(0xFFB09A8E)),
+                      style: TextStyle(fontSize: 13, color: AppColors.inkFaint),
                       textAlign: TextAlign.center,
                     ),
                   ],

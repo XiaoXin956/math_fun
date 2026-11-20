@@ -3,9 +3,21 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../models/models.dart';
 import '../services/session.dart';
+import '../theme/app_theme.dart';
+
+/// 一组答题记录（同一天、同一玩法）。
+class _RecordGroup {
+  final String key;
+  final String title;
+  final List<Record> records;
+
+  _RecordGroup(this.key, this.title, this.records);
+
+  int get correctCount => records.where((r) => r.correct).length;
+}
 
 /// 成绩记录页：查看本人或（家长查看）某个孩子的历史答题记录。
-/// 支持「全部 / 错题回顾」切换，展示答题时间、题目、我的答案与正确答案。
+/// 「全部记录」按 日期+玩法 分组；「错题回顾」直接平铺显示错题。
 class HistoryPage extends StatefulWidget {
   static const routeName = '/history';
 
@@ -26,8 +38,32 @@ class _HistoryPageState extends State<HistoryPage> {
   int _total = 0;
   static const int _pageSize = 50;
   bool _initialized = false;
+  // 已展开的分组 key（默认全部收起）
+  final Set<String> _expanded = {};
 
   ApiClient get _client => Session.createClient();
+
+  /// 把记录按「日期 + 玩法」聚合成组，保持服务端返回的时间倒序。
+  List<_RecordGroup> _buildGroups() {
+    final map = <String, _RecordGroup>{};
+    for (final r in _records) {
+      final key = '${r.dateLabel}|${r.mode}';
+      // 记录按时间倒序，组内第一条即最新一条；取它的时分秒作为该组代表时间
+      final time = r.timeLabel.length >= 19 ? r.timeLabel.substring(11) : '';
+      final group = map.putIfAbsent(
+        key,
+        () => _RecordGroup(
+          key,
+          time.isEmpty
+              ? '${r.dateLabel} ${r.modeGroupLabel}'
+              : '${r.dateLabel} $time ${r.modeGroupLabel}',
+          [],
+        ),
+      );
+      group.records.add(r);
+    }
+    return map.values.toList();
+  }
 
   @override
   void initState() {
@@ -57,6 +93,10 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   Future<void> _load() async {
+    // 每次加载默认全部收起分组
+    if (_expanded.isNotEmpty) {
+      setState(() => _expanded.clear());
+    }
     // 加载状态由 _fetch 内部统一设置，避免重复 setState 与鼠标设备更新冲突
     await _fetch(reset: true);
   }
@@ -139,7 +179,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 children: [
                   Text('共 $_total 条${_wrongOnly ? '错题' : '记录'}',
                       style: const TextStyle(
-                          fontSize: 14, color: Color(0xFF8A5A4A))),
+                          fontSize: 14, color: AppColors.inkSoft)),
                   TextButton(onPressed: _load, child: const Text('刷新')),
                 ],
               ),
@@ -152,17 +192,9 @@ class _HistoryPageState extends State<HistoryPage> {
                             child: Text(_wrongOnly
                                 ? '太棒了，还没有错题！'
                                 : '还没有答题记录'))
-                        : ListView.separated(
-                            itemCount: _records.length + 1,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 8),
-                            itemBuilder: (_, i) {
-                              if (i == _records.length) {
-                                return _loadMoreButton();
-                              }
-                              return _recordCard(_records[i]);
-                            },
-                          ),
+                        : _wrongOnly
+                            ? _wrongList()
+                            : _groupedList(),
               ),
             ],
           ),
@@ -171,10 +203,90 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
+  /// 错题回顾：平铺显示，不分组。
+  Widget _wrongList() {
+    return ListView.separated(
+      itemCount: _records.length + 1,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, i) {
+        if (i == _records.length) return _loadMoreButton();
+        return _recordCard(_records[i]);
+      },
+    );
+  }
+
+  /// 全部记录：按「日期 + 玩法」分组，每组可展开/收起。
+  Widget _groupedList() {
+    final groups = _buildGroups();
+    return ListView.builder(
+      itemCount: groups.length + 1,
+      itemBuilder: (_, i) {
+        if (i == groups.length) return _loadMoreButton();
+        return _groupCard(groups[i]);
+      },
+    );
+  }
+
+  Widget _groupCard(_RecordGroup group) {
+    final expanded = _expanded.contains(group.key);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() {
+              if (expanded) {
+                _expanded.remove(group.key);
+              } else {
+                _expanded.add(group.key);
+              }
+            }),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                      color: AppColors.inkSoft),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      group.title,
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Text('${group.correctCount}/${group.records.length}',
+                      style: const TextStyle(
+                          fontSize: 14, color: AppColors.inkSoft)),
+                ],
+              ),
+            ),
+          ),
+          if (expanded) ...[
+            const Divider(height: 1, color: AppColors.surfaceAlt),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+              child: Column(
+                children: [
+                  for (final r in group.records) ...[
+                    _recordCard(r, compact: true),
+                    const SizedBox(height: 5),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _modeChip(String label, bool wrong, IconData icon) {
     final selected = _wrongOnly == wrong;
     return Material(
-      color: selected ? const Color(0xFFFF7A59) : const Color(0xFFFFF0E8),
+      color: selected ? AppColors.brand : AppColors.surfaceAlt,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         onTap: () => _switchMode(wrong),
@@ -186,13 +298,13 @@ class _HistoryPageState extends State<HistoryPage> {
             children: [
               Icon(icon,
                   size: 18,
-                  color: selected ? Colors.white : const Color(0xFF8A5A4A)),
+                  color: selected ? Colors.white : AppColors.inkSoft),
               const SizedBox(width: 6),
               Text(label,
                   style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
-                      color: selected ? Colors.white : const Color(0xFF8A5A4A))),
+                      color: selected ? Colors.white : AppColors.inkSoft)),
             ],
           ),
         ),
@@ -206,7 +318,7 @@ class _HistoryPageState extends State<HistoryPage> {
         padding: EdgeInsets.symmetric(vertical: 16),
         child: Center(
             child: Text('没有更多了',
-                style: TextStyle(fontSize: 13, color: Color(0xFFB09A8E)))),
+                style: TextStyle(fontSize: 13, color: AppColors.inkFaint))),
       );
     }
     return Padding(
@@ -226,60 +338,68 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
-  Widget _recordCard(Record record) {
+  Widget _recordCard(Record record, {bool compact = false}) {
+    // 组内已标注日期和玩法，这里只显示具体时间点
+    String timeText = record.timeLabel;
+    if (compact && record.timeLabel.length >= 19) {
+      timeText = record.timeLabel.substring(11, 19);
+    }
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF0E8),
-                    borderRadius: BorderRadius.circular(999),
+                if (!compact)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceAlt,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(record.modeLabel,
+                        style: const TextStyle(
+                            fontSize: 11, color: AppColors.star)),
                   ),
-                  child: Text(record.modeLabel,
-                      style: const TextStyle(
-                          fontSize: 12, color: Color(0xFFE8842C))),
-                ),
                 const Spacer(),
-                Text(record.timeLabel,
+                Text(timeText,
                     style: const TextStyle(
-                        fontSize: 11, color: Color(0xFF8A5A4A))),
+                        fontSize: 11, color: AppColors.inkSoft)),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 4),
             Text(
               record.expression,
               style: const TextStyle(
-                  fontSize: 22,
+                  fontSize: 19,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF5A3E36)),
+                  color: AppColors.ink),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             Row(
               children: [
                 Icon(
                   record.correct ? Icons.check_circle : Icons.cancel,
-                  size: 18,
+                  size: 16,
                   color: record.correct
-                      ? const Color(0xFF2E9E5B)
-                      : const Color(0xFFD9534F),
+                      ? AppColors.success
+                      : AppColors.danger,
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  record.correct
-                      ? '答对了，我的答案 ${record.userAnswer} ✅'
-                      : '答错了 ❌  我的答案 ${record.userAnswer}  ·  正确答案 ${record.answer}',
-                  style: TextStyle(
-                      fontSize: 14,
-                      color: record.correct
-                          ? const Color(0xFF2E9E5B)
-                          : const Color(0xFFD9534F)),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    record.correct
+                        ? '答对了，我的答案 ${record.userAnswer} ✅'
+                        : '答错了 ❌  我的答案 ${record.userAnswer}  ·  正确答案 ${record.answer}',
+                    style: TextStyle(
+                        fontSize: 13,
+                        color: record.correct
+                            ? AppColors.success
+                            : AppColors.danger),
+                  ),
                 ),
               ],
             ),

@@ -32,6 +32,7 @@ void main() async {
   // 自由练习：一次下发全部题目+答案，本地判分，最后批量上报
   router.add('POST', '/api/practice/questions', practiceQuestions);
   router.add('POST', '/api/practice/results', practiceResults);
+  router.add('GET', '/api/practice/daily', practiceDaily);
   router.add('GET', '/api/history', history);
   router.add('GET', '/api/stats', stats);
 

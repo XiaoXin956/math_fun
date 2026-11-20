@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS practice_daily (
 CREATE TABLE IF NOT EXISTS handwriting_submissions (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
+  batch_id VARCHAR(64) NOT NULL,
   question_id VARCHAR(64) NOT NULL,
   expression VARCHAR(64) NOT NULL,
   answer INT NOT NULL,
@@ -114,5 +115,6 @@ CREATE TABLE IF NOT EXISTS handwriting_submissions (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   reviewed_at DATETIME NULL,
   INDEX idx_user (user_id),
-  INDEX idx_status (status)
+  INDEX idx_status (status),
+  INDEX idx_batch (batch_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

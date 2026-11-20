@@ -60,13 +60,32 @@ const List<GradeConfig> gradeConfigs = [
       ops: [Op.add, Op.sub, Op.mul, Op.div], maxOps: 3),
 ];
 
+/// 数值范围分类：10/20/50/100/1000 以内，与年级并列。
+/// 用 101-105 编码，避免与年级 1-6 冲突；全链路（成绩/进度/积分）复用 grade 字段。
+/// 运算按范围自动匹配：小数范围只加减，中等范围加表内乘除，1000 以内四则。
+const List<GradeConfig> rangeConfigs = [
+  GradeConfig(grade: 101, name: '10以内', min: 1, max: 10, maxResult: 10,
+      ops: [Op.add, Op.sub], maxOps: 1),
+  GradeConfig(grade: 102, name: '20以内', min: 1, max: 20, maxResult: 20,
+      ops: [Op.add, Op.sub], maxOps: 1),
+  GradeConfig(grade: 103, name: '50以内', min: 1, max: 50, maxResult: 50,
+      ops: [Op.add, Op.sub, Op.mul, Op.div], maxOps: 1),
+  GradeConfig(grade: 104, name: '100以内', min: 1, max: 100, maxResult: 100,
+      ops: [Op.add, Op.sub, Op.mul, Op.div], maxOps: 1),
+  GradeConfig(grade: 105, name: '1000以内', min: 1, max: 1000, maxResult: 1000,
+      ops: [Op.add, Op.sub, Op.mul, Op.div], maxOps: 2),
+];
+
 GradeConfig gradeConfigOf(int grade) {
-  return gradeConfigs.firstWhere(
-    (c) => c.grade == grade,
-    orElse: () => const GradeConfig(
-        grade: 1, name: '一年级', min: 1, max: 20, maxResult: 20,
-        ops: [Op.add, Op.sub], maxOps: 1),
-  );
+  for (final c in gradeConfigs) {
+    if (c.grade == grade) return c;
+  }
+  for (final c in rangeConfigs) {
+    if (c.grade == grade) return c;
+  }
+  return const GradeConfig(
+      grade: 1, name: '一年级', min: 1, max: 20, maxResult: 20,
+      ops: [Op.add, Op.sub], maxOps: 1);
 }
 
 final _rnd = Random.secure();

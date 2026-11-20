@@ -12,6 +12,7 @@ import 'pages/points_page.dart';
 import 'pages/practice_page.dart';
 import 'pages/review_page.dart';
 import 'pages/timed_page.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,8 +21,6 @@ void main() {
 
 class MathFunApp extends StatelessWidget {
   const MathFunApp({super.key});
-
-  static const _primary = Color(0xFFFF7A59);
 
   @override
   Widget build(BuildContext context) {
@@ -44,43 +43,7 @@ class _AppShell extends StatelessWidget {
           return MaterialApp(
             title: '数学乐园',
             debugShowCheckedModeBanner: false,
-            theme: ThemeData(
-              useMaterial3: true,
-              colorSchemeSeed: MathFunApp._primary,
-              brightness: Brightness.light,
-              scaffoldBackgroundColor: const Color(0xFFFFF6F0),
-              appBarTheme: const AppBarTheme(
-                centerTitle: true,
-                titleTextStyle: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF5A3E36),
-                ),
-                backgroundColor: Colors.transparent,
-                elevation: 0,
-              ),
-              cardTheme: CardThemeData(
-                color: Colors.white,
-                elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-              elevatedButtonTheme: ElevatedButtonThemeData(
-                style: ElevatedButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  minimumSize: const Size(double.infinity, 54),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  textStyle: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
+            theme: buildAppTheme(),
             // 根据登录状态自动切换首页，登录/退出无需手动导航
             home: state.user != null ? const HomePage() : const LoginPage(),
             routes: {

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../services/session.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_components.dart';
 import '../widgets/common.dart';
 import '../widgets/question_runner.dart';
 
@@ -34,7 +36,8 @@ class _TimedPageState extends State<TimedPage> {
       setState(() {
         _best = (res['best'] as List)
             .map((e) => e as Map<String, dynamic>)
-            .toList();
+            .toList()
+          ..sort((a, b) => (a['grade'] as int).compareTo(b['grade'] as int));
       });
     } catch (_) {
       // 保持原状
@@ -60,38 +63,69 @@ class _TimedPageState extends State<TimedPage> {
               const SizedBox(height: 20),
               const Text(
                 '60 秒倒计时，答对越多分数越高！',
-                style: TextStyle(fontSize: 14, color: Color(0xFF8A5A4A)),
+                style: TextStyle(fontSize: 14, color: AppColors.inkSoft),
               ),
               const SizedBox(height: 16),
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (_best.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Center(child: Text('还没有挑战记录，快开始吧！')),
-                )
-              else
-                ..._best.map((b) {
-                  final grade = b['grade'] as int;
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.all(12),
-                      leading: const Icon(Icons.bolt, color: Color(0xFFE8842C)),
-                      title: Text("$grade 年级最佳：${b['score']} 分",
-                          style: const TextStyle(fontSize: 16)),
-                      subtitle: Text("答对 ${b['correct']} 题",
-                          style: const TextStyle(fontSize: 13)),
-                    ),
-                  );
-                }),
-              const Spacer(),
-              ElevatedButton(
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _best.isEmpty
+                        ? const Center(child: Text('还没有挑战记录，快开始吧！'))
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Text('各年级最佳成绩',
+                                  style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.inkSoft)),
+                              const SizedBox(height: 8),
+                              Expanded(
+                                child: ListView.builder(
+                                  itemCount: _best.length,
+                                  itemBuilder: (_, i) {
+                                    final b = _best[i];
+                                    final grade = b['grade'] as int;
+                                    return Card(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      child: ListTile(
+                                        contentPadding: const EdgeInsets.all(12),
+                                        leading: CircleAvatar(
+                                          backgroundColor: AppColors.infoSoft,
+                                          child: Text('$grade',
+                                              style: const TextStyle(
+                                                  fontSize: 16,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: AppColors.info)),
+                                        ),
+                                        title:
+                                            Text('${GradeChips.labelOf(grade)} 最佳成绩',
+                                                style: const TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight: FontWeight.w700)),
+                                        subtitle: Text('答对 ${b['correct']} 题',
+                                            style: const TextStyle(fontSize: 13)),
+                                        trailing: Text('${b['score']} 分',
+                                            style: const TextStyle(
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.w800,
+                                                color: AppColors.info)),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+              ),
+              const SizedBox(height: 12),
+              BrandButton(
+                '开始 60 秒挑战',
+                icon: Icons.bolt_rounded,
+                gradient: const LinearGradient(colors: [
+                  AppColors.info,
+                  Color(0xFF3D6B93)]),
                 onPressed: _play,
-                child: const Text('开始 60 秒挑战'),
               ),
             ],
           ),

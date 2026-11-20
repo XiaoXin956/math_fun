@@ -9,6 +9,13 @@ import 'question_generator.dart';
 
 int _int(dynamic v) => (v is num ? v.toInt() : int.tryParse('$v') ?? -1);
 
+/// 聚合结果转 int：兼容 num/String/null（SUM 无数据时为 NULL，DECIMAL 可能为 String）。
+int _aggInt(dynamic v) {
+  if (v is num) return v.toInt();
+  if (v == null) return 0;
+  return int.tryParse('$v') ?? 0;
+}
+
 void _checkUsername(String username) {
   if (!RegExp(r'^[A-Za-z0-9_]{3,20}$').hasMatch(username)) {
     throw const ApiError(400, '用户名需为 3-20 位字母、数字或下划线');
@@ -22,8 +29,11 @@ void _checkPassword(String password) {
 }
 
 void _checkGrade(int grade) {
-  if (grade < 1 || grade > 6) {
-    throw const ApiError(400, '年级需为 1-6（小学一至六年级）');
+  // 年级 1-6；数值范围分类 101-105（10/20/50/100/1000 以内）
+  final isGrade = grade >= 1 && grade <= 6;
+  final isRange = grade >= 101 && grade <= 105;
+  if (!isGrade && !isRange) {
+    throw const ApiError(400, '需选择年级（1-6）或数值范围（101-105）');
   }
 }
 
@@ -153,14 +163,15 @@ Future<List<Map<String, dynamic>>> _childrenOf(int parentId) async {
 // ---------- 年级配置 ----------
 
 Map<String, dynamic> grades() {
-  return {
-    'grades': gradeConfigs.map((c) {
-      return {
+  Map<String, dynamic> toDto(GradeConfig c) => {
         'grade': c.grade,
         'name': c.name,
         'ops': c.ops.map((o) => opSymbol(o)).toList(),
       };
-    }).toList(),
+  return {
+    'grades': gradeConfigs.map(toDto).toList(),
+    // 数值范围分类（10/20/50/100/1000 以内），与年级并列
+    'ranges': rangeConfigs.map(toDto).toList(),
   };
 }
 
@@ -314,14 +325,36 @@ Future<Map<String, dynamic>> practiceQuestions(RouteContext ctx) async {
 
 // ---------- 自由练习：批量上报成绩（一次请求写入全部记录） ----------
 
+/// 查询当天自由练习已用次数（用于前端提示"今日已用 N/5 次"）。
+Future<Map<String, dynamic>> practiceDaily(RouteContext ctx) async {
+  final user = await requireUser(ctx.request.headers);
+  const dailyAwardLimit = 5;
+  final rows = await Db.withConn((conn) async {
+    final res = await conn.execute(
+        'SELECT rounds FROM practice_daily '
+        'WHERE user_id = :userId AND practice_date = CURDATE()',
+        {'userId': user['id']});
+    return res.rows;
+  });
+  final used = rows.isEmpty
+      ? 0
+      : (rows.first.typedAssoc()['rounds'] as num).toInt();
+  return {
+    'used': used,
+    'limit': dailyAwardLimit,
+    'remaining': (dailyAwardLimit - used).clamp(0, dailyAwardLimit),
+  };
+}
+
 Future<Map<String, dynamic>> practiceResults(RouteContext ctx) async {
   final user = await requireUser(ctx.request.headers);
   final userId = user['id'] as int;
   final grade = _int(ctx.body['grade']);
   _checkGrade(grade);
-  // mode 默认 practice；challenge 闯关也走此批量写记录，但积分由 completeChallenge 负责
+  // mode 默认 practice；challenge/timed 也走此批量写记录，但积分由各自接口负责
   final mode = _str(ctx.body, 'mode');
-  final recordMode = mode == 'challenge' ? 'challenge' : 'practice';
+  final recordMode =
+      (mode == 'challenge' || mode == 'timed') ? mode : 'practice';
 
   final rawList = ctx.body['results'];
   if (rawList is! List || rawList.isEmpty || rawList.length > 20) {
@@ -369,8 +402,8 @@ Future<Map<String, dynamic>> practiceResults(RouteContext ctx) async {
 
   final accuracy = validCount == 0 ? 0.0 : correctCount / validCount;
 
-  // 闯关模式：只写逐题记录，不计入自由练习的每日次数，积分由 completeChallenge 负责
-  if (recordMode == 'challenge') {
+  // 闯关/限时：只写逐题记录，不计入自由练习的每日次数，积分由各自接口负责
+  if (recordMode != 'practice') {
     return {
       'correct': correctCount,
       'total': validCount,
@@ -479,21 +512,21 @@ Future<Map<String, dynamic>> stats(RouteContext ctx) async {
     }).join(',');
     final res = await conn.execute(
         'SELECT COUNT(*) AS total, '
-        'SUM(correct = 1) AS correct, '
+        'COALESCE(SUM(correct = 1), 0) AS correct, '
         'COUNT(DISTINCT user_id) AS players, '
-        'SUM(mode = "timed" AND correct = 1) AS timed_correct '
+        'COALESCE(SUM(mode = "timed" AND correct = 1), 0) AS timed_correct '
         'FROM records WHERE user_id IN ($placeholders)',
         params);
     return res.rows.first.typedAssoc();
   });
-  final total = (row['total'] as num).toInt();
-  final correct = (row['correct'] as num).toInt();
+  final total = _aggInt(row['total']);
+  final correct = _aggInt(row['correct']);
 
   return {
     'totalAnswered': total,
     'totalCorrect': correct,
     'accuracy': total == 0 ? 0.0 : correct / total,
-    'players': (row['players'] as num).toInt(),
+    'players': _aggInt(row['players']),
   };
 }
 
@@ -747,8 +780,10 @@ Future<Map<String, dynamic>> submitHandwriting(RouteContext ctx) async {
   final user = await requireUser(ctx.request.headers);
   final questionId = _str(ctx.body, 'question_id');
   final image = _str(ctx.body, 'image');
+  final batchId = _str(ctx.body, 'batch_id');
 
   if (questionId.isEmpty) throw const ApiError(400, '缺少题目 ID');
+  if (batchId.isEmpty) throw const ApiError(400, '缺少批次号');
   if (image.length < 100) {
     throw const ApiError(400, '手写答案图片无效');
   }
@@ -772,10 +807,11 @@ Future<Map<String, dynamic>> submitHandwriting(RouteContext ctx) async {
   await Db.withConn((conn) async {
     await conn.execute(
         'INSERT INTO handwriting_submissions '
-        '(user_id, question_id, expression, answer, image, status) '
-        'VALUES (:userId, :qid, :expression, :answer, :image, "pending")',
+        '(user_id, batch_id, question_id, expression, answer, image, status) '
+        'VALUES (:userId, :batchId, :qid, :expression, :answer, :image, "pending")',
         {
           'userId': user['id'],
+          'batchId': batchId,
           'qid': questionId,
           'expression': row['expression'],
           'answer': row['answer'],
@@ -786,7 +822,8 @@ Future<Map<String, dynamic>> submitHandwriting(RouteContext ctx) async {
   return {'ok': true, 'message': '已提交，等待家长批改'};
 }
 
-/// 家长查看待批改列表
+/// 家长查看待批改列表：按批次（一次练习 = 一组）分组。
+/// 兼容旧数据：无 batch_id 的历史记录各自成一组（batchId 形如 legacy_<id>）。
 Future<Map<String, dynamic>> pendingHandwriting(RouteContext ctx) async {
   final parent = await requireUser(ctx.request.headers);
   if (parent['role'] != 'parent') {
@@ -795,7 +832,7 @@ Future<Map<String, dynamic>> pendingHandwriting(RouteContext ctx) async {
   final children = await _childrenOf(parent['id'] as int);
   final childIds = children.map((c) => c['id'] as int).toList();
   if (childIds.isEmpty) {
-    return {'submissions': <Map<String, dynamic>>[], 'total': 0};
+    return {'batches': <Map<String, dynamic>>[], 'total': 0};
   }
 
   final rows = await Db.withConn((conn) async {
@@ -805,40 +842,54 @@ Future<Map<String, dynamic>> pendingHandwriting(RouteContext ctx) async {
       return ':cid$i';
     }).join(',');
     final res = await conn.execute(
-        'SELECT s.id, s.user_id, s.expression, s.answer, s.image, s.created_at, u.nickname '
+        'SELECT s.id, s.user_id, s.batch_id, s.expression, s.answer, s.image, '
+        's.created_at, u.nickname '
         'FROM handwriting_submissions s JOIN users u ON u.id = s.user_id '
         'WHERE s.user_id IN ($placeholders) AND s.status = "pending" '
-        'ORDER BY s.created_at DESC LIMIT 50',
+        'ORDER BY s.created_at DESC, s.id ASC LIMIT 300',
         params);
     return res.rows;
   });
 
-  final list = rows.map((row) {
+  // 按 batch_id 聚合；旧记录（batch_id 为空）用 legacy_<id> 独立成组
+  final grouped = <String, Map<String, dynamic>>{};
+  for (final row in rows) {
     final r = row.typedAssoc();
-    return {
+    final rawBatch = (r['batch_id'] as String?) ?? '';
+    final batchKey = rawBatch.isEmpty ? 'legacy_${r['id']}' : rawBatch;
+    final item = {
       'id': r['id'],
-      'childId': r['user_id'],
-      'childName': r['nickname'],
       'expression': r['expression'],
       'answer': r['answer'],
       'image': r['image'],
-      'createdAt': _isoDateTime(r['created_at']),
     };
-  }).toList();
-  return {'submissions': list, 'total': list.length};
+    final group = grouped.putIfAbsent(batchKey, () {
+      return {
+        'batchId': batchKey,
+        'childId': r['user_id'],
+        'childName': r['nickname'],
+        'createdAt': _isoDateTime(r['created_at']),
+        'items': <Map<String, dynamic>>[],
+      };
+    });
+    (group['items'] as List).add(item);
+  }
+  final batches = grouped.values.toList();
+  return {'batches': batches, 'total': batches.length};
 }
 
-/// 家长批改：确认正确加分、否则扣分，分值由家长决定（0-10）
+/// 家长整组批改：一组（一次手写练习）只结算一次积分，组内全部标记已批改。
+/// 兼容旧数据 batchId 形如 legacy_<id>（单条成组）。
 Future<Map<String, dynamic>> reviewHandwriting(RouteContext ctx) async {
   final parent = await requireUser(ctx.request.headers);
   if (parent['role'] != 'parent') {
     throw const ApiError(403, '只有家长账号可以批改手写答案');
   }
-  final submissionId = _int(ctx.body['submission_id']);
+  final batchId = _str(ctx.body, 'batch_id');
   final correct = ctx.body['correct'];
   final points = _int(ctx.body['points']);
 
-  if (submissionId < 1) throw const ApiError(400, '缺少提交记录 ID');
+  if (batchId.isEmpty) throw const ApiError(400, '缺少批次号');
   if (correct is! bool) {
     throw const ApiError(400, '请选择判断结果（正确/错误）');
   }
@@ -846,49 +897,63 @@ Future<Map<String, dynamic>> reviewHandwriting(RouteContext ctx) async {
     throw const ApiError(400, '积分绝对值不能超过 10');
   }
 
+  // legacy_<id> 为旧单条记录，按 id 精确匹配；其余按 batch_id 匹配
+  final isLegacy = batchId.startsWith('legacy_');
+  final legacyId = isLegacy ? int.tryParse(batchId.substring(7)) ?? -1 : -1;
+  // SELECT 有 JOIN，用带别名 s 的字段；UPDATE 无 JOIN，用不带别名的字段
+  final selectWhere = isLegacy ? 's.id = :key' : 's.batch_id = :key';
+  final updateWhere = isLegacy ? 'id = :key' : 'batch_id = :key';
+  final keyValue = isLegacy ? legacyId : batchId;
+
   final rows = await Db.withConn((conn) async {
     final res = await conn.execute(
-        'SELECT s.id, s.user_id, s.status FROM handwriting_submissions s '
+        'SELECT DISTINCT s.user_id, s.status FROM handwriting_submissions s '
         'JOIN users u ON u.id = s.user_id '
-        'WHERE s.id = :submissionId AND u.parent_id = :parentId',
-        {'submissionId': submissionId, 'parentId': parent['id']});
+        'WHERE $selectWhere AND u.parent_id = :parentId',
+        {'key': keyValue, 'parentId': parent['id']});
     return res.rows;
   });
   if (rows.isEmpty) {
-    throw const ApiError(404, '提交记录不存在');
+    throw const ApiError(404, '批改记录不存在');
   }
-  final row = rows.first.typedAssoc();
-  if (row['status'] != 'pending') {
-    throw const ApiError(400, '该提交已批改过，不能重复批改');
+  final childId = rows.first.typedAssoc()['user_id'] as int;
+  final allPending = rows.every((r) => r.typedAssoc()['status'] == 'pending');
+  if (!allPending) {
+    throw const ApiError(400, '该组已批改过，不能重复批改');
   }
-  final childId = row['user_id'] as int;
 
   final change = correct ? points : -points;
   final reason = correct
-      ? '手写答案批改为正确，+$points 分'
-      : '手写答案批改为错误，-$points 分';
+      ? '手写练习批改正确，+$points 分'
+      : '手写练习批改错误，-$points 分';
 
   await Db.withConn((conn) async {
-    await conn.execute(
-        'UPDATE users SET points = points + :change WHERE id = :childId',
-        {'change': change, 'childId': childId});
-    await conn.execute(
-        'INSERT INTO points_records (user_id, grade, level, `change`, reason) '
-        'VALUES (:userId, 0, 0, :change, :reason)',
-        {
-          'userId': childId,
-          'change': change,
-          'reason': reason,
-        });
-    await conn.execute(
-        'UPDATE handwriting_submissions '
-        'SET status = "reviewed", reviewed_by = :reviewer, review_change = :change, reviewed_at = NOW() '
-        'WHERE id = :id',
-        {
-          'reviewer': parent['id'],
-          'change': change,
-          'id': submissionId,
-        });
+    // 积分入账 + 整组标记必须原子化，避免中途失败造成「加分了但状态没更新」
+    await conn.execute('START TRANSACTION');
+    try {
+      // 一组只加/扣一次分
+      await conn.execute(
+          'UPDATE users SET points = points + :change WHERE id = :childId',
+          {'change': change, 'childId': childId});
+      await conn.execute(
+          'INSERT INTO points_records (user_id, grade, level, `change`, reason) '
+          'VALUES (:userId, 0, 0, :change, :reason)',
+          {'userId': childId, 'change': change, 'reason': reason});
+      await conn.execute(
+          'UPDATE handwriting_submissions '
+          'SET status = "reviewed", reviewed_by = :reviewer, '
+          'review_change = :change, reviewed_at = NOW() '
+          'WHERE $updateWhere',
+          {
+            'key': keyValue,
+            'reviewer': parent['id'],
+            'change': change,
+          });
+      await conn.execute('COMMIT');
+    } catch (e) {
+      await conn.execute('ROLLBACK');
+      rethrow;
+    }
   });
 
   return {'ok': true, 'changed': change, 'reason': reason};
@@ -956,14 +1021,14 @@ Future<Map<String, dynamic>> listChildren(RouteContext ctx) async {
     final cid = child['id'] as int;
     final rows = await Db.withConn((conn) async {
       final res = await conn.execute(
-          'SELECT COUNT(*) AS total, SUM(correct = 1) AS correct '
+          'SELECT COUNT(*) AS total, COALESCE(SUM(correct = 1), 0) AS correct '
           'FROM records WHERE user_id = :cid',
           {'cid': cid});
       return res.rows;
     });
     final row = rows.first.typedAssoc();
-    final total = (row['total'] as num).toInt();
-    final correct = (row['correct'] as num).toInt();
+    final total = _aggInt(row['total']);
+    final correct = _aggInt(row['correct']);
     result.add({
       ...child,
       'totalAnswered': total,

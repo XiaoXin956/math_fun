@@ -148,6 +148,7 @@ class Db {
     await pool.execute('CREATE TABLE IF NOT EXISTS handwriting_submissions ('
         'id INT AUTO_INCREMENT PRIMARY KEY,'
         'user_id INT NOT NULL,'
+        'batch_id VARCHAR(64) NOT NULL DEFAULT "",'
         'question_id VARCHAR(64) NOT NULL,'
         'expression VARCHAR(64) NOT NULL,'
         'answer INT NOT NULL,'
@@ -158,7 +159,8 @@ class Db {
         'created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,'
         'reviewed_at DATETIME NULL,'
         'INDEX idx_user (user_id),'
-        'INDEX idx_status (status)'
+        'INDEX idx_status (status),'
+        'INDEX idx_batch (batch_id)'
         ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 
     // 兼容旧库：补充后来新增的字段（新库建表时已包含，重复执行报错则忽略）
@@ -168,6 +170,15 @@ class Db {
     try {
       await pool.execute(
           "ALTER TABLE questions ADD COLUMN type VARCHAR(20) NOT NULL DEFAULT 'math'");
+    } catch (_) {}
+    // 手写提交表增加批次号（旧库兼容：空串表示无批次的历史记录）
+    try {
+      await pool.execute(
+          'ALTER TABLE handwriting_submissions ADD COLUMN batch_id VARCHAR(64) NOT NULL DEFAULT "" AFTER user_id');
+    } catch (_) {}
+    try {
+      await pool.execute(
+          'ALTER TABLE handwriting_submissions ADD INDEX idx_batch (batch_id)');
     } catch (_) {}
 
     // 清理过期题目（7 天前的临时题目记录）

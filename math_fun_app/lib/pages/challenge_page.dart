@@ -5,6 +5,7 @@ import '../api/api_client.dart';
 import '../bloc/auth_cubit.dart';
 import '../models/models.dart';
 import '../services/session.dart';
+import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import '../widgets/question_runner.dart';
 
@@ -54,7 +55,7 @@ class _ChallengePageState extends State<ChallengePage> {
     return Scaffold(
       appBar: AppBar(title: const Text('🏆 闯关挑战')),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -71,7 +72,7 @@ class _ChallengePageState extends State<ChallengePage> {
               const SizedBox(height: 24),
               const Text(
                 '每个年级 10 关，正确率 ≥ 70% 即可通关 ⭐',
-                style: TextStyle(fontSize: 14, color: Color(0xFF8A5A4A)),
+                style: TextStyle(fontSize: 14, color: AppColors.inkSoft),
               ),
               const SizedBox(height: 16),
               if (_loading)
@@ -80,19 +81,28 @@ class _ChallengePageState extends State<ChallengePage> {
                   child: Center(child: CircularProgressIndicator()),
                 )
               else
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate:
-                      SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    childAspectRatio: 1.1,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                  ),
-                  itemCount: _levels.length,
-                  itemBuilder: (_, i) => _levelCard(_levels[i]),
-                ),
+                LayoutBuilder(builder: (context, constraints) {
+                  // 按屏宽自适应列数：卡片最小宽度 110，间距 12
+                  const minCardWidth = 110.0;
+                  const spacing = 12.0;
+                  final available = constraints.maxWidth;
+                  final columns = ((available + spacing) /
+                          (minCardWidth + spacing))
+                      .floor()
+                      .clamp(2, 6);
+                  final cardWidth =
+                      (available - spacing * (columns - 1)) / columns;
+                  return Wrap(
+                    spacing: spacing,
+                    runSpacing: spacing,
+                    children: _levels
+                        .map((level) => SizedBox(
+                              width: cardWidth,
+                              child: _levelCard(level),
+                            ))
+                        .toList(),
+                  );
+                }),
             ],
           ),
         ),
@@ -101,32 +111,94 @@ class _ChallengePageState extends State<ChallengePage> {
   }
 
   Widget _levelCard(LevelInfo level) {
-    return Card(
+    final Color badgeColor;
+    if (level.passed) {
+      badgeColor = AppColors.star;
+    } else if (level.unlocked) {
+      badgeColor = AppColors.purple;
+    } else {
+      badgeColor = AppColors.inkFaint;
+    }
+    final String status;
+    final Color statusColor;
+    if (level.passed) {
+      status = '✓ 已通关';
+      statusColor = AppColors.success;
+    } else if (level.unlocked) {
+      status = '可挑战';
+      statusColor = AppColors.purple;
+    } else {
+      status = '未解锁';
+      statusColor = AppColors.inkFaint;
+    }
+
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
       child: InkWell(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: level.unlocked ? () => _playLevel(level) : null,
-        child: Column(
-          children: [
-            const Text('🚩', style: TextStyle(fontSize: 28)),
-            const SizedBox(height: 4),
-            Text('第 ${level.level} 关',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 2),
-            Text('${level.questions} 题',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF8A5A4A))),
-            const SizedBox(height: 6),
-            Text(
-              starText(level.stars),
-              style: const TextStyle(fontSize: 14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(
+              color: level.passed ? AppColors.star.withValues(alpha: 0.5) : AppColors.line,
+              width: level.passed ? 1.5 : 1,
             ),
-            const SizedBox(height: 2),
-            if (level.passed)
-              const Text('已通关', style: TextStyle(fontSize: 12, color: Color(0xFF2E9E5B)))
-            else if (level.unlocked)
-              const Text('可挑战', style: TextStyle(fontSize: 12, color: Color(0xFFE8842C)))
-            else
-              const Text('🔒 未解锁', style: TextStyle(fontSize: 12, color: Color(0xFFB09A8E))),
-          ],
+          ),
+          child: Column(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: level.unlocked
+                      ? LinearGradient(colors: [
+                          badgeColor,
+                          badgeColor.withValues(alpha: 0.7)])
+                      : null,
+                  color: level.unlocked ? null : AppColors.surfaceAlt,
+                  shape: BoxShape.circle,
+                  boxShadow: level.unlocked ? AppShadows.soft : null,
+                ),
+                child: Text(
+                  level.passed ? '🏆' : (level.unlocked ? '${level.level}' : '🔒'),
+                  style: TextStyle(
+                    fontSize: level.passed ? 26 : 22,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text('第 ${level.level} 关',
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 2),
+              Text('${level.questions} 题',
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.inkSoft)),
+              const SizedBox(height: 6),
+              Text(starText(level.stars),
+                  style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+                child: Text(status,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: statusColor)),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -222,14 +294,14 @@ class _ChallengePageState extends State<ChallengePage> {
                 style: TextStyle(
                     fontSize: 15,
                     color: (points['changed'] as int) >= 0
-                        ? const Color(0xFF2E9E5B)
-                        : const Color(0xFFD9534F)),
+                        ? AppColors.success
+                        : AppColors.danger),
               ),
               if (passed && res['nextUnlocked'] == true)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: Text('下一关已解锁！',
-                      style: TextStyle(fontSize: 16, color: Color(0xFF2E9E5B))),
+                      style: TextStyle(fontSize: 16, color: AppColors.success)),
                 ),
             ],
           ),
