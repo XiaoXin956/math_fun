@@ -12,4 +12,3 @@ macos/
 windows/
 test/
 integration_test/
-.env
